@@ -1,3 +1,5 @@
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/elephant-track/elephant-server/blob/main/elephant_server.ipynb)
+
 ## ELEPHANT: Tracking cell lineages in 3D by incremental deep learning
 
 <table>

@@ -1,0 +1,108 @@
+Bootstrap: docker
+From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
+
+%files
+    ./docker /docker
+    ./script /opt/elephant/script
+    ./app /app
+    ./elephant-core /elephant-core
+
+%environment
+    export UWSGI_UID=$(id -u)
+    export UWSGI_GID=$(id -g)
+    export UWSGI_CHOWN_SOCKET=$(id -u):$(id -g)
+    export PYTHONPATH=/app
+
+%post
+    # Install requirements
+    set -x \
+    && apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests -y \
+    nginx \
+    redis-server \
+    supervisor \
+    ca-certificates \
+    curl \
+    gnupg && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+    # Install conda modules
+    conda install --override-channels -c main -c conda-forge \
+    h5py=2.10.0 \
+    flask=1.1.2 \
+    flask-redis=0.4.0 \
+    libiconv=1.15 \
+    pika=1.1.0 \
+    scikit-learn=0.23.1 \
+    scikit-image=0.17.2 \
+    scipy=1.4.1 \
+    tensorboardX=2.1 \
+    tqdm=4.48.2 \
+    uwsgi=2.0.18 \
+    zarr=2.4.0
+
+    # Install and set up RabbbitMQ
+    curl -fsSL https://github.com/rabbitmq/signing-keys/releases/download/2.0/rabbitmq-release-signing-key.asc | apt-key add - && \
+    apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests -y \
+    apt-transport-https && \
+    echo 'deb http://dl.bintray.com/rabbitmq-erlang/debian bionic erlang-22.x\ndeb https://dl.bintray.com/rabbitmq/debian bionic main' >> /etc/apt/sources.list.d/bintray.rabbitmq.list && \
+    echo 'Package: erlang*\nPin: release o=Bintray\nPin-Priority: 1000' >> /etc/apt/preferences.d/erlang && \
+    apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests -y \
+    rabbitmq-server && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+    RABBITMQ_USER=user && RABBITMQ_PASSWORD=user
+    service rabbitmq-server start
+    rabbitmqctl add_user $RABBITMQ_USER $RABBITMQ_PASSWORD 2>/dev/null
+    rabbitmqctl set_user_tags $RABBITMQ_USER administrator
+    rabbitmqctl set_permissions -p / $RABBITMQ_USER ".*" ".*" ".*"
+    service rabbitmq-server stop
+
+    # Set up nginx
+    cp /docker/nginx.conf /etc/nginx/nginx.conf
+    sed -i 's/listen 80/listen 8080/g' /etc/nginx/nginx.conf
+
+    # forward request and error logs to docker log collector
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+    # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
+    mkdir -p /etc/uwsgi
+    cp /docker/uwsgi.ini /etc/uwsgi/uwsgi.ini
+    sed -i '9d' /etc/uwsgi/uwsgi.ini
+
+    # Custom Supervisord config
+    cp /docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+    sed -i 's#/usr/bin/pidproxy /var/lib/rabbitmq/mnesia/rabbitmq.pid /bin/bash -c "/rabbitmq.sh"#rabbitmq-server#g' /etc/supervisor/conf.d/supervisord.conf
+
+    # Copy start.sh script that will check for a /app/prestart.sh script and run it before starting the app
+    cp /docker/start.sh /start.sh
+    chmod +x /start.sh
+
+    # Install elephant core
+    pip install -U /elephant-core && rm -rf /elephant-core
+
+    # Clean up
+    rm -r /docker
+
+%runscript
+    # Initialize files to bind
+    rm -r .elephant_binds && mkdir -p .elephant_binds/var/run
+    cp -a /var/log .elephant_binds/var/
+    cp -a /var/lib .elephant_binds/var/
+
+%labels
+    Author Ko Sugawara <ko.sugawara@ens-lyon.fr>
+
+%help
+    This is a container to run ELEPHANt server.
+    Usage:
+    singularity build --fakeroot elephant.sif elephant.def
+    singularity run --fakeroot elephant.sif
+    singularity instance start --nv --bind $HOME/.elephant_binds/var/lib:/var/lib,$HOME/.elephant_binds/var/log:/var/log,$HOME/.elephant_binds/var/run:/var/run,workspace:/workspace elephant.sif elephant
+    SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 singularity exec instance://elephant /start.sh
+    singularity instance stop elephant

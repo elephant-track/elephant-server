@@ -41,7 +41,7 @@ Please refer to [the documentation]() for details.
 
 ---
 
-### ELEPHANT Server Requirements
+### ELEPHANT Server Requirements (Docker)
 
 |                  | Requirements                                                                                                                                                                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -49,9 +49,14 @@ Please refer to [the documentation]() for details.
 | Docker           | [Docker](https://www.docker.com/) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (see [supported versions](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#container-runtimes)) |
 | GPU              | NVIDIA CUDA GPU with sufficient VRAM for your data (recommended: 11 GB or higher)                                                                                                                                                                                                           |
 | Storage          | Sufficient size for your data (recommended: 1 TB or higher)                                                                                                                                                                                                                                 |
+### ELEPHANT Server Requirements (Singularity)
 
-| Info <br> :information_source: | The total amount of data can be 10-30 times larger than the original data size when the prediction outputs (optional) are generated. |
-| :----------------------------: | :----------------------------------------------------------------------------------------------------------------------------------- |
+|                  | Requirements                                                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operating System | Linux-based OS                                                                                                                                                  |
+| Singularity      | [Singularity](https://sylabs.io/guides/3.7/user-guide/index.html) (see [requirements for NVIDIA GPUs & CUDA](https://sylabs.io/guides/3.7/user-guide/gpu.html)) |
+| GPU              | NVIDIA CUDA GPU with sufficient VRAM for your data (recommended: 11 GB or higher)                                                                               |
+| Storage          | Sufficient size for your data (recommended: 1 TB or higher)                                                                                                     |
 
 ### Setting up the ELEPHANT Server
 

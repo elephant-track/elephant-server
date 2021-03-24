@@ -91,9 +91,10 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
 
 %runscript
     # Initialize files to bind
-    rm -r .elephant_binds && mkdir -p .elephant_binds/var/run
-    cp -a /var/log .elephant_binds/var/
-    cp -a /var/lib .elephant_binds/var/
+    rm -r $HOME/.elephant_binds 2> /dev/null
+    mkdir -p $HOME/.elephant_binds/var/run
+    cp -a /var/log $HOME/.elephant_binds/var/
+    cp -a /var/lib $HOME/.elephant_binds/var/
 
 %labels
     Author Ko Sugawara <ko.sugawara@ens-lyon.fr>
@@ -103,6 +104,7 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
     Usage:
     singularity build --fakeroot elephant.sif elephant.def
     singularity run --fakeroot elephant.sif
-    singularity instance start --nv --bind $HOME/.elephant_binds/var/lib:/var/lib,$HOME/.elephant_binds/var/log:/var/log,$HOME/.elephant_binds/var/run:/var/run,workspace:/workspace elephant.sif elephant
+    singularity instance start --nv --bind $HOME/.elephant_binds/var/lib:/var/lib,$HOME/.elephant_binds/var/log:/var/log,$HOME/.elephant_binds/var/run:/var/run,$ELEPHANT_WORKSPACE:/workspace elephant.sif elephant
+    singularity exec instance://elephant python /opt/elephant/script/dataset_generator.py --uint16 /workspace/datasets/elephant-demo/elephant-demo.h5 /workspace/datasets/elephant-demo
     SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 singularity exec instance://elephant /start.sh
     singularity instance stop elephant

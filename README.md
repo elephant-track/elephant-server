@@ -55,11 +55,15 @@ Please refer to [the documentation]() for details.
 
 ### Setting up the ELEPHANT Server
 
-There are two options to set up the ELEPHANT server.
+There are three options to set up the ELEPHANT server.
 
 - <a href="#/?id=setting-up-with-docker" onclick="alwaysScroll(event)">Setting up with Docker</a>
   
-  This option is recommended if you have a powerful computer that satisfies <a href="#/?id=elephant-server-requirements" onclick="alwaysScroll(event)">the server requirements</a>.
+  This option is recommended if you have a powerful computer that satisfies <a href="#/?id=elephant-server-requirements-docker" onclick="alwaysScroll(event)">the server requirements (Docker)</a> with root privileges.
+
+- <a href="#/?id=setting-up-with-singularity" onclick="alwaysScroll(event)">Setting up with Singularity</a>
+  
+  This option is recommended if you can access a powerful computer that satisfies <a href="#/?id=elephant-server-requirements-singularity" onclick="alwaysScroll(event)">the server requirements (Singularity)</a> as a non-root user (e.g. HPC cluster).
 
 - <a href="#/?id=setting-up-with-google-colab" onclick="alwaysScroll(event)">Setting up with Google Colab</a>
   

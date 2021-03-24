@@ -172,13 +172,13 @@ workspace
 
 ```bash
 # This is optional
-export ELEPHANT_WORKSPACE="YOUR_DATASET_DIR"
+export ELEPHANT_WORKSPACE="YOUR_WORKSPACE_DIR"
 make bash
 ```
 
 ```bash
 # This is optional
-make ELEPHANT_WORKSPACE="YOUR_DATASET_DIR" bash
+make ELEPHANT_WORKSPACE="YOUR_WORKSPACE_DIR" bash
 ```
 
 | Info <br> :information_source: | Multi-view data is not supported by ELEPHANT. You need to create a fused data (e.g. with [BigStitcher Fuse](https://imagej.net/BigStitcher_Fuse)) before converting to `.zarr` . |
@@ -197,6 +197,73 @@ make launch # launch the services
 ```
 
 Now, the ELEPHANT server is ready.
+
+#### Setting up with Singularity
+
+##### Prerequisite
+
+`Singularity >= 3.6.0` is required. Please check the version of Singularity on your system.
+
+```bash
+singularity --version
+```
+
+##### 1. Build a container
+
+Run the following command at the project root directory where you can find a `elephant.def` file.
+
+```bash
+singularity build --fakeroot elephant.sif elephant.def
+```
+
+##### 2. Prepare files to bind
+
+The following command copies `/var/lib/`, `/var/log/` and `/var/run/` in the container to `$HOME/.elephant_binds` on the host.
+
+```bash
+singularity run --fakeroot elephant.sif
+```
+
+##### 3. Start an instance for the ELEPHANT server
+
+It is recommended to launch the ELEPHANT server inside a singularity `instance` rather than using `shell` or `exec` directly, which can make some processes alive after exiting the `supervisor` process. All processes inside a `instance` can be terminated by stopping the `instance` ([see details](https://sylabs.io/guides/3.7/user-guide/running_services.html#container-instances-in-singularity)).
+
+The command below starts an `instance` named `elephant` using the image written in `elephant.sif`.\
+The `--nv` option is required to set up the container that can use NVIDIA GPU and CUDA ([see details](https://sylabs.io/guides/3.7/user-guide/gpu.html)).\
+The `--bind` option specifies the directories to bind from the host to the container ([see details](https://sylabs.io/guides/3.7/user-guide/bind_paths_and_mounts.html)). The files copied in the previous step are bound to the original container location as `writable` files. Please set `$ELEPHANT_WORKSPACE` to the `workspace` directory on your system.
+
+```bash
+singularity instance start --nv --bind $HOME/.elephant_binds/var/lib:/var/lib,$HOME/.elephant_binds/var/log:/var/log,$HOME/.elephant_binds/var/run:/var/run,$ELEPHANT_WORKSPACE:/workspace elephant.sif elephant
+```
+
+##### 4. Generate a dataset for the ELEPHANT server
+
+The following command will generate a dataset for the ELEPHANT server.
+Please see details in <a href="#/?id=_3-generate-a-dataset-for-the-elephant-server" onclick="alwaysScroll(event)">the Docker part</a>.
+
+```bash
+singularity exec instance://elephant python /opt/elephant/script/dataset_generator.py --uint16 /workspace/datasets/elephant-demo/elephant-demo.h5 /workspace/datasets/elephant-demo
+```
+
+##### 5. Launch the ELEPHANT server
+
+The following command execute a script that launches the ELEPHANT server.
+Please specify the `SINGULARITYENV_CUDA_VISIBLE_DEVICES` if you want to use a specific GPU device on your system (default: `0`).
+
+```bash
+SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 singularity exec instance://elephant /start.sh
+```
+
+At this point, you will be able to work with the ELEPHANT server.
+Please follow <a href="#/?id=remote-connection-to-the-elephant-server" onclick="alwaysScroll(event)">the instructions for seting up the remote connection</a>.
+
+##### 6. Stop an instance for the ELEPHANT server
+
+After exiting the `exec` by `Ctrl+C`, please do not forget to stop the `instance`.
+
+```bash
+singularity instance stop elephant
+```
 
 #### Setting up with Google Colab
 

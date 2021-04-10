@@ -240,6 +240,9 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.is_ae:
             return tensor_input, tensor_input
         tensor_label = tensor_label.view(self.crop_size)
+        flip_dims = [-(1 + i) for i, v in enumerate(torch.rand(3)) if v < 0.5]
+        tensor_input.data = torch.flip(tensor_input, flip_dims)
+        tensor_label.data = torch.flip(tensor_label, flip_dims)
         return tensor_input, tensor_label
 
 

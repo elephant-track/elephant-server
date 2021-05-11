@@ -33,17 +33,8 @@ RUN conda install --override-channels -c main -c conda-forge \
     zarr=2.4.0
 
 # Install and set up RabbbitMQ
-RUN curl -fsSL https://github.com/rabbitmq/signing-keys/releases/download/2.0/rabbitmq-release-signing-key.asc | apt-key add - && \
-    apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-    apt-transport-https && \
-    echo 'deb http://dl.bintray.com/rabbitmq-erlang/debian bionic erlang-22.x\ndeb https://dl.bintray.com/rabbitmq/debian bionic main' >> /etc/apt/sources.list.d/bintray.rabbitmq.list && \
-    echo 'Package: erlang*\nPin: release o=Bintray\nPin-Priority: 1000' >> /etc/apt/preferences.d/erlang && \
-    apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-    rabbitmq-server && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
+RUN chmod +x /tmp/install-rabbitmq.sh && /tmp/install-rabbitmq.sh && rm /tmp/install-rabbitmq.sh
 EXPOSE 5672
 ENV RABBITMQ_USER user
 ENV RABBITMQ_PASSWORD user

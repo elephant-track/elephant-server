@@ -43,17 +43,7 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
     zarr=2.4.0
 
     # Install and set up RabbbitMQ
-    curl -fsSL https://github.com/rabbitmq/signing-keys/releases/download/2.0/rabbitmq-release-signing-key.asc | apt-key add - && \
-    apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-    apt-transport-https && \
-    echo 'deb http://dl.bintray.com/rabbitmq-erlang/debian bionic erlang-22.x\ndeb https://dl.bintray.com/rabbitmq/debian bionic main' >> /etc/apt/sources.list.d/bintray.rabbitmq.list && \
-    echo 'Package: erlang*\nPin: release o=Bintray\nPin-Priority: 1000' >> /etc/apt/preferences.d/erlang && \
-    apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-    rabbitmq-server && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh
 
     RABBITMQ_USER=user && RABBITMQ_PASSWORD=user
     service rabbitmq-server start

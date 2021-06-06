@@ -164,7 +164,7 @@ def _update_flow_labels(spots_dict,
     n_dims = len(za_label.shape) - 2
     for t, spots in spots_dict.items():
         label = np.zeros(za_label.shape[1:], dtype='float32')
-        MIN_AREA_ELLIPSOID = 20
+        MIN_AREA_ELLIPSOID = 9
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
                 print('aborted')
@@ -393,7 +393,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     za_label = zarr.open(zpath_seg_label, mode='a')
     za_label_vis = zarr.open(zpath_seg_label_vis, mode='a')
     keyorder = ['tp', 'fp', 'tn', 'fn', 'tb', 'fb']
-    MIN_AREA_ELLIPSOID = 20
+    MIN_AREA_ELLIPSOID = 9
     for t, spots in spots_dict.items():
         # label = np.zeros(label_shape, dtype='int64') - 1
         label = np.where(

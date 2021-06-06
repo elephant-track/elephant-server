@@ -190,7 +190,7 @@ def _update_flow_labels(spots_dict,
     return jsonify({'completed': True})
 
 
-@ app.route('/update/flow', methods=['POST'])
+@app.route('/update/flow', methods=['POST'])
 def update_flow_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(res='error'), 400
@@ -469,7 +469,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     return jsonify({'completed': True})
 
 
-@ app.route('/update/seg', methods=['POST'])
+@app.route('/update/seg', methods=['POST'])
 def update_seg_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(res='error'), 400
@@ -523,7 +523,7 @@ def update_seg_labels():
     return response
 
 
-@ app.route('/train/seg', methods=['POST'])
+@app.route('/train/seg', methods=['POST'])
 def train_seg():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(res='error'), 400
@@ -674,7 +674,7 @@ def reset_seg_models():
     return jsonify({'completed': True})
 
 
-@ app.route('/export/ctc', methods=['POST'])
+@app.route('/export/ctc', methods=['POST'])
 def export_ctc():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(res='error'), 400

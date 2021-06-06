@@ -254,9 +254,26 @@ def train_flow():
         spots_dict[spot['t']].append(spot)
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
     redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
-    models = load_flow_models(config.model_path,
-                              config.keep_axials,
-                              config.device)
+    try:
+        models = load_flow_models(config.model_path,
+                                  config.keep_axials,
+                                  config.device)
+    except FileNotFoundError:
+        print('Model file not found. Start initialization...')
+        reset_config = ResetConfig(req_json)
+        print(reset_config)
+        try:
+            init_flow_models(reset_config)
+        except RuntimeError as e:
+            print(traceback.format_exc())
+            return jsonify(error=f'Runtime Error: {e}'), 500
+        except Exception as e:
+            print(traceback.format_exc())
+            return jsonify(error=f'Exception: {e}'), 500
+        models = load_flow_models(config.model_path,
+                                  config.keep_axials,
+                                  config.device)
+        # return jsonify(message='model file not found'), 204
     try:
         _update_flow_labels(spots_dict,
                             config.scales,
@@ -539,9 +556,29 @@ def train_seg():
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
     redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
-    models = load_seg_models(config.model_path,
-                             config.keep_axials,
-                             config.device)
+    try:
+        models = load_seg_models(config.model_path,
+                                 config.keep_axials,
+                                 config.device)
+    except FileNotFoundError:
+        print('Model file not found. Start initialization...')
+        reset_config = ResetConfig(req_json)
+        print(config)
+        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
+        try:
+            init_seg_models(reset_config)
+        except RuntimeError as e:
+            print(traceback.format_exc())
+            return jsonify(error=f'Runtime Error: {e}'), 500
+        except Exception as e:
+            print(traceback.format_exc())
+            return jsonify(error=f'Exception: {e}'), 500
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
+        models = load_seg_models(config.model_path,
+                                 config.keep_axials,
+                                 config.device)
     try:
         _update_seg_labels(spots_dict,
                            config.scales,

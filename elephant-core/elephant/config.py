@@ -63,6 +63,7 @@ class BaseConfig():
         self.device = config.get('device')
         self.debug = config.get('debug', False)
         self.output_prediction = config.get('output_prediction', False)
+        self.is_3d = config.get('is_3d', True)
         self.patch_size = config.get('patch')
         if self.patch_size is not None:
             self.patch_size = self.patch_size[::-1]
@@ -74,6 +75,12 @@ class BaseConfig():
             self.keep_axials = tuple(True if i < n_keep_axials else False
                                      for i in range(4))
         self.crop_size = config.get('crop_size', DEFAULT_CROP_SIZE)[::-1]
+        if not self.is_3d:
+            if self.patch_size is not None:
+                self.patch_size = self.patch_size[-2:]
+            if self.scales is not None:
+                self.scales = self.scales[-2:]
+            self.crop_size = self.crop_size[-2:]
         if self.dataset_name is not None:
             self.zpath_input = os.path.join(DATASETS_DIR,
                                             self.dataset_name,

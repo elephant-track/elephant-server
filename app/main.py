@@ -70,6 +70,7 @@ from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
 from elephant.util import normalize_zero_one
 from elephant.util import get_device
+from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 
 REDIS_URL = "redis://:password@localhost:6379/0"
@@ -170,21 +171,37 @@ def _update_flow_labels(spots_dict,
                 print('aborted')
                 return jsonify({'completed': False})
             centroid = np.array(spot['pos'][::-1])
+            centroid = centroid[-n_dims:]
             covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
+            covariance = covariance[-n_dims:, -n_dims:]
             radii, rotation = np.linalg.eigh(covariance)
             radii = np.sqrt(radii)
-            dd, rr, cc = ellipsoid(centroid,
-                                   radii,
-                                   rotation,
-                                   scales,
-                                   label.shape[-3:],
-                                   MIN_AREA_ELLIPSOID)
+            if n_dims == 3:
+                dd, rr, cc = ellipsoid(centroid,
+                                       radii,
+                                       rotation,
+                                       scales,
+                                       label.shape[-3:],
+                                       MIN_AREA_ELLIPSOID)
+            else:
+                rr, cc = ellipse(centroid[-2:],
+                                 radii[-2:],
+                                 rotation[-2:, -2:],
+                                 label.shape[-2:],
+                                 MIN_AREA_ELLIPSOID)
             weight = 1  # if spot['tag'] in ['tp'] else false_weight
             displacement = spot['displacement']  # X, Y, Z
             for i in range(n_dims):
-                label[i, dd, rr, cc] = displacement[i] / \
-                    scales[-1 - i] / flow_norm_factor[i]  # X, Y, Z
-            label[-1, dd, rr, cc] = weight  # last channels is for weight
+                if n_dims == 3:
+                    label[i, dd, rr, cc] = (
+                        displacement[i] / scales[-1 - i] / flow_norm_factor[i])
+                else:
+                    label[i, rr, cc] = (
+                        displacement[i] / scales[-1 - i] / flow_norm_factor[i])
+            if n_dims == 3:
+                label[-1, dd, rr, cc] = weight  # last channels is for weight
+            else:
+                label[-1, rr, cc] = weight  # last channels is for weight
         print('frame:{}, {} linkings'.format(t + 1, len(spots)))
         za_label[t] = label
     return jsonify({'completed': True})
@@ -257,7 +274,8 @@ def train_flow():
     try:
         models = load_flow_models(config.model_path,
                                   config.keep_axials,
-                                  config.device)
+                                  config.device,
+                                  is_3d=config.is_3d)
     except FileNotFoundError:
         print('Model file not found. Start initialization...')
         reset_config = ResetConfig(req_json)
@@ -272,7 +290,8 @@ def train_flow():
             return jsonify(error=f'Exception: {e}'), 500
         models = load_flow_models(config.model_path,
                                   config.keep_axials,
-                                  config.device)
+                                  config.device,
+                                  is_3d=config.is_3d)
         # return jsonify(message='model file not found'), 204
     try:
         _update_flow_labels(spots_dict,
@@ -381,6 +400,25 @@ def reset_flow_models():
     return jsonify({'completed': True})
 
 
+def _dilate_2d_indices(rr, cc, shape):
+    if len(rr) != len(cc):
+        raise RuntimeError('indices should have the same length')
+    n_pixels = len(rr)
+    rr_dilate = np.array([0, ] * (n_pixels * 3 ** 2))
+    cc_dilate = np.copy(rr_dilate)
+    offset = 0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            rr_dilate[offset:offset +
+                      n_pixels] = (rr + dy).clip(0, shape[0] - 1)
+            cc_dilate[offset:offset +
+                      n_pixels] = (cc + dx).clip(0, shape[1] - 1)
+            offset += n_pixels
+    unique_dilate = np.unique(
+        np.stack((rr_dilate, cc_dilate)), axis=1)
+    return unique_dilate[0], unique_dilate[1]
+
+
 def _dilate_3d_indices(dd, rr, cc, shape):
     if len(dd) != len(rr) or len(dd) != len(cc):
         raise RuntimeError('indices should have the same length')
@@ -411,6 +449,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     za_label_vis = zarr.open(zpath_seg_label_vis, mode='a')
     keyorder = ['tp', 'fp', 'tn', 'fn', 'tb', 'fb']
     MIN_AREA_ELLIPSOID = 9
+    n_dims = len(za_input.shape) - 1
     for t, spots in spots_dict.items():
         # label = np.zeros(label_shape, dtype='int64') - 1
         label = np.where(
@@ -425,10 +464,18 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 return jsonify({'completed': False})
             cnt[spot['tag']] += 1
             centroid = np.array(spot['pos'][::-1])
+            centroid = centroid[-n_dims:]
             covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
+            covariance = covariance[-n_dims:, -n_dims:]
             radii, rotation = np.linalg.eigh(covariance)
             radii = np.sqrt(radii)
-            dd_outer, rr_outer, cc_outer = ellipsoid(
+            if n_dims == 3:
+                draw_func = ellipsoid
+                dilate_func = _dilate_3d_indices
+            else:
+                draw_func = ellipse
+                dilate_func = _dilate_2d_indices
+            indices_outer = draw_func(
                 centroid,
                 radii,
                 rotation,
@@ -438,7 +485,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             )
             label_offset = 0 if spot['tag'] in ['tp', 'tb', 'tn'] else 3
             if spot['tag'] in ('tp', 'fn'):
-                dd_inner, rr_inner, cc_inner = ellipsoid(
+                indices_inner = draw_func(
                     centroid,
                     radii * c_ratio,
                     rotation,
@@ -446,30 +493,29 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     label.shape,
                     MIN_AREA_ELLIPSOID
                 )
-                dd_inner_p, rr_inner_p, cc_inner_p = _dilate_3d_indices(
-                    dd_inner, rr_inner, cc_inner, label.shape)
-                label[dd_outer, rr_outer, cc_outer] = np.where(
-                    np.fmod(label[dd_outer, rr_outer, cc_outer] - 1, 3) <= 1,
+                indices_inner_p = dilate_func(*indices_inner, label.shape)
+                label[indices_outer] = np.where(
+                    np.fmod(label[indices_outer] - 1, 3) <= 1,
                     2 + label_offset,
-                    label[dd_outer, rr_outer, cc_outer]
+                    label[indices_outer]
                 )
-                label[dd_inner_p, rr_inner_p, cc_inner_p] = 2 + label_offset
-                label[dd_inner, rr_inner, cc_inner] = np.where(
-                    np.fmod(label[dd_inner, rr_inner, cc_inner] - 1, 3) <= 2,
+                label[indices_inner_p] = 2 + label_offset
+                label[indices_inner] = np.where(
+                    np.fmod(label[indices_inner] - 1, 3) <= 2,
                     3 + label_offset,
-                    label[dd_inner, rr_inner, cc_inner]
+                    label[indices_inner]
                 )
             elif spot['tag'] in ('tb', 'fb'):
-                label[dd_outer, rr_outer, cc_outer] = np.where(
-                    np.fmod(label[dd_outer, rr_outer, cc_outer] - 1, 3) <= 1,
+                label[indices_outer] = np.where(
+                    np.fmod(label[indices_outer] - 1, 3) <= 1,
                     2 + label_offset,
-                    label[dd_outer, rr_outer, cc_outer]
+                    label[indices_outer]
                 )
             elif spot['tag'] in ('tn', 'fp'):
-                label[dd_outer, rr_outer, cc_outer] = np.where(
-                    np.fmod(label[dd_outer, rr_outer, cc_outer] - 1, 3) <= 0,
+                label[indices_outer] = np.where(
+                    np.fmod(label[indices_outer] - 1, 3) <= 0,
                     1 + label_offset,
-                    label[dd_outer, rr_outer, cc_outer]
+                    label[indices_outer]
                 )
         print('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
@@ -559,7 +605,8 @@ def train_seg():
     try:
         models = load_seg_models(config.model_path,
                                  config.keep_axials,
-                                 config.device)
+                                 config.device,
+                                 is_3d=config.is_3d)
     except FileNotFoundError:
         print('Model file not found. Start initialization...')
         reset_config = ResetConfig(req_json)
@@ -578,7 +625,8 @@ def train_seg():
             torch.cuda.empty_cache()
         models = load_seg_models(config.model_path,
                                  config.keep_axials,
-                                 config.device)
+                                 config.device,
+                                 is_3d=config.is_3d)
     try:
         _update_seg_labels(spots_dict,
                            config.scales,
@@ -587,7 +635,8 @@ def train_seg():
                            config.zpath_seg_label_vis,
                            config.auto_bg_thresh,
                            config.c_ratio)
-        input_shape = zarr.open(config.zpath_input, mode='r').shape[-3:]
+        n_dims = 2 + config.is_3d  # 3 or 2
+        input_shape = zarr.open(config.zpath_input, mode='r').shape[-n_dims:]
         train_dataset = SegmentationDatasetZarr(
             config.zpath_input,
             config.zpath_seg_label,
@@ -607,7 +656,8 @@ def train_seg():
             weight_tensor = torch.tensor(config.class_weights).float()
             logger = TensorBoard(config.log_dir)
             loss = SegmentationLoss(class_weights=weight_tensor,
-                                    false_weight=config.false_weight)
+                                    false_weight=config.false_weight,
+                                    is_3d=config.is_3d)
             loss = loss.to(config.device)
             optimizers = [torch.optim.Adam(
                 model.parameters(), lr=config.lr) for model in models]

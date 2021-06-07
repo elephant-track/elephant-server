@@ -58,6 +58,13 @@ def parse_args():
         help=('divide the original pixel values by this value ' +
               '(with uint8, the values should be scale-downed to 0-255)')
     )
+    parser.add_argument(
+        '--2d',
+        dest='is_2d',
+        action='store_true',
+        help=('with this flag, the original image will be stored as 2d+time' +
+              'default: False (3d+time)')
+    )
     return parser.parse_args()
 
 
@@ -73,6 +80,8 @@ def main():
     # timepoints are stored as 't00000', 't000001', ...
     timepoints = list(filter(re.compile(r't\d{5}').search, list(f.keys())))
     shape = f[timepoints[0]]['s00']['0']['cells'].shape
+    if args.is_2d:
+        shape = shape[-2:]
     p = Path(args.output)
     img = zarr.open(
         str(p / 'imgs.zarr'),
@@ -124,8 +133,9 @@ def main():
     dtype = np.uint16 if args.is_uint16 else np.uint8
     for timepoint in tqdm(timepoints):
         # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
+        def func(x): return x[0] if args.is_2d else lambda x: x
         img[int(timepoint[1:])] = (
-            np.array(f[timepoint]['s00']['0']['cells']) // divisor
+            np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
         ).astype(dtype)
 
 

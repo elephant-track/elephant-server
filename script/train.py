@@ -68,11 +68,13 @@ def main():
         if args.command == 'seg':
             models = load_seg_models(config.model_path,
                                      config.keep_axials,
-                                     config.device)
+                                     config.device,
+                                     is_3d=config.is_3d)
         elif args.command == 'flow':
             models = load_flow_models(config.model_path,
                                       config.keep_axials,
-                                      config.device)
+                                      config.device,
+                                      is_3d=config.is_3d)
     except Exception:
         try:
             if args.command == 'seg':
@@ -148,7 +150,8 @@ def main():
         if args.command == 'seg':
             weight_tensor = torch.tensor(config.class_weights)
             loss_fn = SegmentationLoss(class_weights=weight_tensor,
-                                       false_weight=config.false_weight)
+                                       false_weight=config.false_weight,
+                                       is_3d=config.is_3d)
         elif args.command == 'flow':
             loss_fn = FlowLoss()
         loss_fn = loss_fn.to(config.device)

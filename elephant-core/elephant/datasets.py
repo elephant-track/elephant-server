@@ -151,25 +151,42 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.rotation_angle is not None and 0 < self.rotation_angle:
             # rotate image
             theta = randint(-self.rotation_angle, self.rotation_angle)
-            img_input = np.array([
-                rotate(
-                    img_input[z],
-                    theta,
-                    resize=True,
-                    preserve_range=True,
-                    order=1,  # 1: Bi-linear (default)
-                ) for z in range(img_input.shape[0])
-            ])
+            if self.n_dims == 3:
+                img_input = np.array([
+                    rotate(
+                        img_input[z],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=1,  # 1: Bi-linear (default)
+                    ) for z in range(img_input.shape[0])
+                ])
+            else:
+                img_input = rotate(img_input,
+                                   theta,
+                                   resize=True,
+                                   preserve_range=True,
+                                   order=1,  # 1: Bi-linear (default)
+                                   )
+
             # rotate label
-            img_label = np.array([
-                rotate(
-                    img_label[z],
-                    theta,
-                    resize=True,
-                    preserve_range=True,
-                    order=0,  # 0: Nearest-neighbor
-                ) for z in range(img_label.shape[0])
-            ])
+            if self.n_dims == 3:
+                img_label = np.array([
+                    rotate(
+                        img_label[z],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=0,  # 0: Nearest-neighbor
+                    ) for z in range(img_label.shape[0])
+                ])
+            else:
+                img_label = rotate(img_label,
+                                   theta,
+                                   resize=True,
+                                   preserve_range=True,
+                                   order=0,  # 0: Nearest-neighbor
+                                   )
         if 0 < sum(self.scale_factors):
             item_crop_size = [
                 randrange(
@@ -230,9 +247,10 @@ class SegmentationDatasetZarr(du.Dataset):
                     break
         tensor_input = torch.from_numpy(img_input[slices])
         if 0 < sum(self.scale_factors):
+            interpolate_mode = 'trilinear' if self.n_dims == 3 else 'bilinear'
             tensor_input = F.interpolate(tensor_input[None, None],
                                          self.crop_size,
-                                         mode='trilinear',
+                                         mode=interpolate_mode,
                                          align_corners=True)
             tensor_input = tensor_input.view((1,) + self.crop_size)
         else:
@@ -240,7 +258,8 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.is_ae:
             return tensor_input, tensor_input
         tensor_label = tensor_label.view(self.crop_size)
-        flip_dims = [-(1 + i) for i, v in enumerate(torch.rand(3)) if v < 0.5]
+        flip_dims = [-(1 + i)
+                     for i, v in enumerate(torch.rand(self.n_dims)) if v < 0.5]
         tensor_input.data = torch.flip(tensor_input, flip_dims)
         tensor_label.data = torch.flip(tensor_label, flip_dims)
         return tensor_input, tensor_label
@@ -318,27 +337,49 @@ class FlowDatasetZarr(du.Dataset):
         if self.rotation_angle is not None and 0 < self.rotation_angle:
             # rotate image
             theta = randint(-self.rotation_angle, self.rotation_angle)
-            img_input = np.array([
-                [rotate(
-                    img_input[c, z],
-                    theta,
-                    resize=True,
-                    preserve_range=True,
-                    order=1,  # 1: Bi-linear (default)
-                ) for z in range(img_input.shape[1])
-                ] for c in range(img_input.shape[0])
-            ])
+            if self.n_dims == 3:
+                img_input = np.array([
+                    [rotate(
+                        img_input[c, z],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=1,  # 1: Bi-linear (default)
+                    ) for z in range(img_input.shape[1])
+                    ] for c in range(img_input.shape[0])
+                ])
+            else:
+                img_input = np.array([
+                    [rotate(
+                        img_input[c],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=1,  # 1: Bi-linear (default)
+                    )] for c in range(img_input.shape[0])
+                ])
             # rotate label
-            img_label = np.array([
-                [rotate(
-                    img_label[c, z],
-                    theta,
-                    resize=True,
-                    preserve_range=True,
-                    order=0,  # 0: Nearest-neighbor
-                ) for z in range(img_label.shape[1])
-                ] for c in range(img_label.shape[0])
-            ])
+            if self.n_dims == 3:
+                img_label = np.array([
+                    [rotate(
+                        img_label[c, z],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=0,  # 0: Nearest-neighbor
+                    ) for z in range(img_label.shape[1])
+                    ] for c in range(img_label.shape[0])
+                ])
+            else:
+                img_label = np.array([
+                    [rotate(
+                        img_label[c],
+                        theta,
+                        resize=True,
+                        preserve_range=True,
+                        order=0,  # 0: Nearest-neighbor
+                    )] for c in range(img_label.shape[0])
+                ])
             # update flow label (y axis is inversed in the image coordinate)
             cos_theta = math.cos(math.radians(theta))
             sin_theta = math.sin(math.radians(theta))
@@ -365,7 +406,8 @@ class FlowDatasetZarr(du.Dataset):
             # scale labels by resize factor
             img_label[0] *= self.crop_size[2] / item_crop_size[2]  # X
             img_label[1] *= self.crop_size[1] / item_crop_size[1]  # Y
-            img_label[2] *= self.crop_size[0] / item_crop_size[0]  # Z
+            if self.n_dims == 3:
+                img_label[2] *= self.crop_size[0] / item_crop_size[0]  # Z
         else:
             item_crop_size = self.crop_size
         index_pool = np.argwhere(0 < img_label[-1])
@@ -397,9 +439,10 @@ class FlowDatasetZarr(du.Dataset):
                     break
         tensor_input = torch.from_numpy(img_input[slices])
         if 0 < sum(self.scale_factors):
+            interpolate_mode = 'trilinear' if self.n_dims == 3 else 'bilinear'
             tensor_input = F.interpolate(tensor_input[None],
                                          self.crop_size,
-                                         mode='trilinear',
+                                         mode=interpolate_mode,
                                          align_corners=True)
             tensor_input = tensor_input.view((2,) + self.crop_size)
         # Channel order: (flow_x, flow_y, flow_z, mask, input_t0, input_t1)

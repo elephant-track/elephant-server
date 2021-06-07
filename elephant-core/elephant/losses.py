@@ -48,28 +48,34 @@ class SegmentationLoss(nn.Module):
             in the Center Dice loss calculation.
         is_oldloss: `True` if it is a loss without `True`/`False` weight
             normalization (shown in the paper), `False` otherwise (recommended).
+        is_3d: `True` if 3D.
     """
 
     def __init__(self, class_weights=None, false_weight=10., eps=1e-6,
-                 center_value=2, is_oldloss=False):
+                 center_value=2, is_oldloss=False, is_3d=True):
         super().__init__()
         self.nll = nn.NLLLoss(weight=class_weights, reduction='mean')
         self.false_weight = false_weight
         self.eps = eps
         self.center_value = center_value
         self.is_oldloss = is_oldloss
+        kernel_size = (3, 5, 5)
+        sigma = (1., 8., 8.)
+        padding = (1, 2, 2)
+        n_dims = 2 + is_3d  # 3 or 2
         self.downsample = GaussianSmoothing(channels=1,
-                                            kernel_size=(3, 5, 5),
-                                            sigma=(1., 8., 8.),
-                                            dim=3,
+                                            kernel_size=kernel_size[-n_dims:],
+                                            sigma=sigma[-n_dims:],
+                                            dim=n_dims,
                                             stride=2,
-                                            padding=(1, 2, 2))
+                                            padding=padding[-n_dims:])
         self.upsmooth = GaussianSmoothing(channels=1,
-                                          kernel_size=(3, 5, 5),
-                                          sigma=(1., 8., 8.),
-                                          dim=3,
+                                          kernel_size=kernel_size[-n_dims:],
+                                          sigma=sigma[-n_dims:],
+                                          dim=n_dims,
                                           stride=1,
-                                          padding=(1, 2, 2))
+                                          padding=padding[-n_dims:])
+        self.n_dims = n_dims
 
     def forward(self, prediction, target):
         assert prediction.shape[0] == target.shape[0]
@@ -154,7 +160,7 @@ class SegmentationLoss(nn.Module):
                             self.downsample(
                                 torch.exp(prediction[i:i+1, -1:])
                             ),
-                            size=prediction.shape[-3:],
+                            size=prediction.shape[-self.n_dims:],
                             mode='nearest',
                         )
                     )

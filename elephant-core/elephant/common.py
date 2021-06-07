@@ -48,8 +48,8 @@ if os.environ.get('CTC') != '1':
 
 from elephant.datasets import AutoencoderDatasetZarr
 from elephant.losses import AutoencoderLoss
-from elephant.models import FlowResNet3D
-from elephant.models import UNet3D
+from elephant.models import FlowResNet
+from elephant.models import UNet
 from elephant.models import load_flow_models
 from elephant.models import load_seg_models
 from elephant.redis_util import REDIS_KEY_LR
@@ -57,6 +57,7 @@ from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import TrainState
 from elephant.util import get_pad_size
 from elephant.util import normalize_zero_one
+from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 from elephant.util.scaled_moments import scaled_moments_central
 
@@ -216,9 +217,8 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None):
 
 
 def _patch_predict(model, x, patch_size, func):
-    input_shape = x.shape[-3:]
-    assert len(input_shape) == len(patch_size)
-    n_dims = len(input_shape)
+    n_dims = len(patch_size)
+    input_shape = x.shape[-n_dims:]
     # all elements in patch shape should be smaller than or equal to those of
     # input shape
     patch_size = [min(patch_size[i], input_shape[i]) for i in range(n_dims)]
@@ -238,52 +238,60 @@ def _patch_predict(model, x, patch_size, func):
     ]
     overlaps = [max(1, patch_size[i] - intervals[i]) for i in range(n_dims)]
     prediction = np.zeros((3,) + input_shape, dtype='float32')
-    for iz in range(n_patches[0]):
-        slice_z = slice(intervals[0] * iz, intervals[0] * iz + patch_size[0])
-        if x.shape[-3] < slice_z.stop:
-            slice_z = slice(x.shape[-3] - patch_size[0], x.shape[-3])
-        patch_weight_z = np.ones(patch_size, dtype='float32')
-        if 0 < iz:
-            patch_weight_z[:overlaps[0]] *= np.linspace(
-                0, 1, overlaps[0]
-            ).reshape(-1, 1, 1)
-        if iz < n_patches[0] - 1:
-            patch_weight_z[-overlaps[0]:] *= np.linspace(1, 0,
-                                                         overlaps[0]
-                                                         ).reshape(-1, 1, 1)
-        for iy in range(n_patches[1]):
-            slice_y = slice(intervals[1] * iy,
-                            intervals[1] * iy + patch_size[1])
+    for iz in range(n_patches[-3] if n_dims == 3 else 1):
+        if n_dims == 3:
+            slice_z = slice(intervals[-3] * iz,
+                            intervals[-3] * iz + patch_size[-3])
+            if x.shape[-3] < slice_z.stop:
+                slice_z = slice(x.shape[-3] - patch_size[-3], x.shape[-3])
+            patch_weight_z = np.ones(patch_size, dtype='float32')
+            if 0 < iz:
+                patch_weight_z[:overlaps[-3]] *= np.linspace(
+                    0, 1, overlaps[-3]
+                ).reshape(-1, 1, 1)
+            if iz < n_patches[-3] - 1:
+                patch_weight_z[-overlaps[-3]:] *= np.linspace(
+                    1, 0, overlaps[-3]
+                ).reshape(-1, 1, 1)
+        for iy in range(n_patches[-2]):
+            slice_y = slice(intervals[-2] * iy,
+                            intervals[-2] * iy + patch_size[-2])
             if x.shape[-2] < slice_y.stop:
-                slice_y = slice(x.shape[-2] - patch_size[1],
+                slice_y = slice(x.shape[-2] - patch_size[-2],
                                 x.shape[-2])
-            patch_weight_zy = patch_weight_z.copy()
+            if n_dims == 3:
+                patch_weight_zy = patch_weight_z.copy()
+            else:
+                patch_weight_zy = np.ones(patch_size, dtype='float32')[None]
             if 0 < iy:
-                patch_weight_zy[:, :overlaps[1]] *= np.linspace(
-                    0, 1, overlaps[1]
+                patch_weight_zy[:, :overlaps[-2]] *= np.linspace(
+                    0, 1, overlaps[-2]
                 ).reshape(1, -1, 1)
-            if iy < n_patches[1] - 1:
-                patch_weight_zy[:, -overlaps[1]:] *= np.linspace(
-                    1, 0, overlaps[1]
+            if iy < n_patches[-2] - 1:
+                patch_weight_zy[:, -overlaps[-2]:] *= np.linspace(
+                    1, 0, overlaps[-2]
                 ).reshape(1, -1, 1)
-            for ix in range(n_patches[2]):
-                slice_x = slice(intervals[2] * ix,
-                                intervals[2] * ix + patch_size[2])
+            for ix in range(n_patches[-1]):
+                slice_x = slice(intervals[-1] * ix,
+                                intervals[-1] * ix + patch_size[-1])
                 if x.shape[-1] < slice_x.stop:
-                    slice_x = slice(x.shape[-1] - patch_size[2], x.shape[-1])
+                    slice_x = slice(x.shape[-1] - patch_size[-1], x.shape[-1])
                 patch_weight_zyx = patch_weight_zy.copy()
                 if 0 < ix:
-                    patch_weight_zyx[:, :, :overlaps[2]] *= np.linspace(
-                        0, 1, overlaps[2]
+                    patch_weight_zyx[:, :, :overlaps[-1]] *= np.linspace(
+                        0, 1, overlaps[-1]
                     ).reshape(1, 1, -1)
-                if ix < n_patches[2] - 1:
-                    patch_weight_zyx[:, :, -overlaps[2]:] *= np.linspace(
-                        1, 0, overlaps[2]
+                if ix < n_patches[-1] - 1:
+                    patch_weight_zyx[:, :, -overlaps[-1]:] *= np.linspace(
+                        1, 0, overlaps[-1]
                     ).reshape(1, 1, -1)
-                y = func(model(x[:, :, slice_z, slice_y, slice_x])[
-                         0].detach().cpu().numpy())
-                prediction[:, slice_z, slice_y,
-                           slice_x] += y * patch_weight_zyx
+                slices = [slice(None), slice(None), slice_y, slice_x]
+                if n_dims == 3:
+                    slices.insert(2, slice_z)
+                y = func(model(x[slices])[0].detach().cpu().numpy())
+                if n_dims == 2:
+                    patch_weight_zyx = patch_weight_zyx[0]
+                prediction[slices[1:]] += y * patch_weight_zyx
     return prediction
 
 
@@ -299,6 +307,8 @@ def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
                         use_median=True, patch_size=None, crop_box=None,
                         is_pad=False):
     img = img.astype('float32')
+    n_dims = len(img.shape)
+    is_3d = n_dims == 3
     if use_median:
         global_median = np.median(img)
         for z in range(img.shape[0]):
@@ -306,56 +316,47 @@ def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
             if 0 < slice_median:
                 img[z] -= slice_median - global_median
     img = normalize_zero_one(img)
-    models = load_seg_models(model_path, keep_axials,
-                             device, is_eval=True, is_pad=is_pad)
+    models = load_seg_models(model_path, keep_axials, device, is_eval=True,
+                             is_pad=is_pad, is_3d=is_3d)
     if crop_box is not None:
-        img = img[crop_box[0]:crop_box[0] + crop_box[3],  # Z
-                  crop_box[1]:crop_box[1] + crop_box[4],  # Y
-                  crop_box[2]:crop_box[2] + crop_box[5]]  # X
+        slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
+                  slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
+        if is_3d:  # Z
+            slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
+        img = img[slices]
     if patch_size is None:
-        pad_base = (2**keep_axials.count(False), 16, 16)
+        pad_base = (16, 16)
+        if is_3d:
+            pad_base = (2**keep_axials.count(False),) + pad_base
         pad_shape = tuple(
             get_pad_size(img.shape[i], pad_base[i])
-            for i in range(len(img.shape))
+            for i in range(n_dims)
         )
         slices = (slice(None),) + tuple(
             slice(None) if max(pad_shape[i]) == 0 else
             slice(pad_shape[i][0], -pad_shape[i][1])
-            for i in range(len(pad_shape))
+            for i in range(n_dims)
         )
         img = np.pad(img, pad_shape, mode='constant', constant_values=0)
     with torch.no_grad():
         x = torch.from_numpy(img[np.newaxis, np.newaxis]).to(device)
-        prediction = []
-        # test-time augmentation (TTA)
-        # dims: (N, C, D, H, W)
-        for flip_x in range(1):
-            for flip_y in range(1):
-                for flip_z in range(1):
-                    fl_dims = [i-3 for i, flag in
-                               enumerate([flip_z, flip_y, flip_x]) if flag]
-                    xx = x.flip(fl_dims) if fl_dims else x
-                    pred = np.mean([predict(model, xx, patch_size, is_log=True)
-                                    for model in models],
-                                   axis=0
-                                   )
-                    pred = np.flip(pred, fl_dims) if fl_dims else pred
-                    prediction.append(pred)
-        prediction = np.mean(prediction, axis=0)
+        prediction = np.mean([predict(model, x, patch_size, is_log=True)
+                              for model in models], axis=0)
     if patch_size is None:
         prediction = prediction[slices]
-    for z in range(prediction.shape[1]):
-        post_fg = np.maximum(
-            prediction[2, z] - normalize_zero_one(
-                prewitt(gaussian(prediction[0, z], sigma=3))),
-            0
-        )
-        prediction[0, z] = np.minimum(
-            prediction[0, z] + (prediction[2, z] - post_fg),
-            1
-        )
-        prediction[2, z] = post_fg
-        prediction[1, z] = 1. - (prediction[0, z] + prediction[2, z])
+    if is_3d:
+        for z in range(prediction.shape[1]):
+            post_fg = np.maximum(
+                prediction[2, z] - normalize_zero_one(
+                    prewitt(gaussian(prediction[0, z], sigma=3))),
+                0
+            )
+            prediction[0, z] = np.minimum(
+                prediction[0, z] + (prediction[2, z] - post_fg),
+                1
+            )
+            prediction[2, z] = post_fg
+            prediction[1, z] = 1. - (prediction[0, z] + prediction[2, z])
     return prediction
 
 
@@ -398,22 +399,20 @@ def detect_spots(config):
                   config.crop_box[i] + config.crop_box[i + 3])
             if config.crop_box is not None else
             slice(None)
-            for i in range(3)
+            for i in range(0 if config.is_3d else 1, 3)
         )
-        za_seg[config.timepoint,
-               slices_crop[0],
-               slices_crop[1],
-               slices_crop[2]] = (np.transpose(prediction, (1, 2, 3, 0))
-                                  .astype('float16'))
+        za_seg[config.timepoint][slices_crop] = (np.transpose(prediction,
+                                                              (1, 2, 3, 0))
+                                                 .astype('float16'))
 
     return spots
 
 
 def _get_flow_prediction(img, timepoint, model_path, keep_axials, device,
-                         flow_norm_factor, patch_size):
+                         flow_norm_factor, patch_size, is_3d):
     img = normalize_zero_one(img.astype('float32'))
     models = load_flow_models(
-        model_path, keep_axials, device, is_eval=True)
+        model_path, keep_axials, device, is_eval=True, is_3d=is_3d)
 
     if patch_size is None:
         pad_base = (2**keep_axials.count(False), 16, 16)
@@ -443,7 +442,7 @@ def _get_flow_prediction(img, timepoint, model_path, keep_axials, device,
 
 def _estimate_spots_with_flow(spots, flow_stack, scales):
     img_shape = flow_stack[0].shape
-    MIN_AREA_ELLIPSOID = 20
+    MIN_AREA_ELLIPSOID = 9
     res_spots = []
     for spot in spots:
         spot_id = spot['id']
@@ -521,7 +520,8 @@ def spots_with_flow(config, spots):
                                               config.keep_axials,
                                               config.device,
                                               config.flow_norm_factor,
-                                              config.patch_size)
+                                              config.patch_size,
+                                              config.is_3d)
         finally:
             torch.cuda.empty_cache()
         if config.output_prediction:
@@ -595,6 +595,12 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
         radii = np.minimum(r_max, radii)
         cov = eigvecs.dot(np.diag(radii ** 2)).dot(eigvecs.T)
 
+        if n_dims == 2:
+            centroid.insert(0, 0.)
+            tmp = np.eye(3)
+            tmp[-2:, -2:] = cov
+            cov = tmp
+
         def flatten(o): return [item for sublist in o for item in sublist]
         spot = {
             't': i_frame,
@@ -663,11 +669,13 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 
 def init_seg_models(config):
-    models = [UNet3D.three_class_segmentation(
+    models = [UNet.three_class_segmentation(
         config.keep_axials,
         device=config.device,
+        is_3d=config.is_3d,
     ) for i in range(config.n_models)]
-    input_shape = zarr.open(config.zpath_input, mode='r').shape[-3:]
+    n_dims = 2 + config.is_3d  # 3 or 2
+    input_shape = zarr.open(config.zpath_input, mode='r').shape[-n_dims:]
     n_crops = config.n_crops
     train_dataset = AutoencoderDatasetZarr(
         config.zpath_input,
@@ -698,9 +706,10 @@ def init_seg_models(config):
 
 
 def init_flow_models(config):
-    models = [FlowResNet3D.three_dimensional_flow(
+    models = [FlowResNet.three_dimensional_flow(
         config.keep_axials,
         device=config.device,
+        is_3d=config.is_3d,
     ) for i in range(config.n_models)]
     torch.save(models[0].state_dict() if len(models) == 1 else [
         model.state_dict() for model in models], config.model_path)

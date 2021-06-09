@@ -291,7 +291,7 @@ def _patch_predict(model, x, patch_size, func):
                 y = func(model(x[slices])[0].detach().cpu().numpy())
                 if n_dims == 2:
                     patch_weight_zyx = patch_weight_zyx[0]
-                prediction[slices[1:]] += y * patch_weight_zyx
+                prediction[tuple(slices[1:])] += y * patch_weight_zyx
     return prediction
 
 

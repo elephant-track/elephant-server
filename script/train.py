@@ -153,7 +153,7 @@ def main():
                                        false_weight=config.false_weight,
                                        is_3d=config.is_3d)
         elif args.command == 'flow':
-            loss_fn = FlowLoss()
+            loss_fn = FlowLoss(is_3d=config.is_3d)
         loss_fn = loss_fn.to(config.device)
         optimizers = [torch.optim.Adam(
             model.parameters(), lr=config.lr) for model in models]

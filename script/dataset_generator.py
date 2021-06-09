@@ -82,6 +82,7 @@ def main():
     shape = f[timepoints[0]]['s00']['0']['cells'].shape
     if args.is_2d:
         shape = shape[-2:]
+    n_dims = 3 - args.is_2d  # 3 or 2
     p = Path(args.output)
     img = zarr.open(
         str(p / 'imgs.zarr'),
@@ -93,7 +94,7 @@ def main():
     zarr.open(
         str(p / 'flow_outputs.zarr'),
         'w',
-        shape=(len(timepoints) - 1, 3,) + shape,
+        shape=(len(timepoints) - 1, n_dims,) + shape,
         chunks=(1, 1,) + shape,
         dtype='f2'
     )
@@ -106,7 +107,7 @@ def main():
     zarr.open(
         str(p / 'flow_labels.zarr'),
         'w',
-        shape=(len(timepoints) - 1, 4,) + shape,
+        shape=(len(timepoints) - 1, n_dims + 1,) + shape,
         chunks=(1, 1,) + shape,
         dtype='f4'
     )

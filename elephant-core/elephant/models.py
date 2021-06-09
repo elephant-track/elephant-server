@@ -253,8 +253,7 @@ class ResBlockFlow(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1,
                  activation=nn.LeakyReLU(0.1), is_3d=True):
         super().__init__()
-        self.conv = (lambda args: nn.conv3d(*args) if is_3d else
-                     lambda args: nn.conv2d(*args))
+        self.conv = nn.Conv3d if is_3d else nn.Conv2d
         self.res = self.conv(in_channels, out_channels,
                              kernel_size=1, bias=False, stride=stride)
         self.conv1 = self.conv(in_channels, out_channels,
@@ -292,9 +291,9 @@ class FlowResNet(UNet):
     @ classmethod
     def three_dimensional_flow(cls, keep_axials=(False, False, False, False),
                                is_eval=False, device=None, state_dict=None,
-                               is_decoder_only=False, is_3d=True):
-        model = cls(2, 3, final_activation=nn.Tanh(), keep_axials=keep_axials,
-                    is_pad=False, is_3d=is_3d)
+                               is_decoder_only=False, is_pad=False, is_3d=True):
+        model = cls(2, 2 + is_3d, final_activation=nn.Tanh(),
+                    keep_axials=keep_axials, is_pad=is_pad, is_3d=is_3d)
         if state_dict:
             model.load_state_dict(state_dict)
         if device:

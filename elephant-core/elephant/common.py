@@ -237,7 +237,8 @@ def _patch_predict(model, x, patch_size, func):
         for i in range(n_dims)
     ]
     overlaps = [max(1, patch_size[i] - intervals[i]) for i in range(n_dims)]
-    prediction = np.zeros((3,) + input_shape, dtype='float32')
+    prediction = np.zeros((model.out_conv.out_channels,) +
+                          input_shape, dtype='float32')
     for iz in range(n_patches[-3] if n_dims == 3 else 1):
         if n_dims == 3:
             slice_z = slice(intervals[-3] * iz,
@@ -445,36 +446,47 @@ def _get_flow_prediction(img, timepoint, model_path, keep_axials, device,
 
 def _estimate_spots_with_flow(spots, flow_stack, scales):
     img_shape = flow_stack[0].shape
+    n_dims = len(img_shape)
+    assert n_dims == 2 or n_dims == 3, (
+        f'n_dims: len(img_shape.shape) shoud be 2 or 3 but got {n_dims}'
+    )
+    assert n_dims == flow_stack.shape[0], (
+        f'n_dims: {n_dims} shoud be equal to '
+        f'flow_stack.shape[0]: {flow_stack.shape[0]}'
+    )
     MIN_AREA_ELLIPSOID = 9
     res_spots = []
+    draw_func = ellipsoid if n_dims == 3 else ellipse
     for spot in spots:
         spot_id = spot['id']
         pos = spot['pos']  # XYZ
         centroid = np.array(pos[::-1])  # ZYX
+        centroid = centroid[-n_dims:]
         covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
+        covariance = covariance[-n_dims:, -n_dims:]
         radii, rotation = np.linalg.eigh(covariance)
         radii = np.sqrt(radii)
-        dd, rr, cc = ellipsoid(centroid,
-                               radii,
-                               rotation,
-                               scales,
-                               img_shape,
-                               MIN_AREA_ELLIPSOID)
-        if 0 < len(dd):
+        indices = draw_func(centroid,
+                            radii,
+                            rotation,
+                            scales,
+                            img_shape,
+                            MIN_AREA_ELLIPSOID)
+        if 0 < len(indices[0]):
             displacement = [
-                flow_stack[dim][dd, rr, cc].mean() * scales[-1 - dim]
-                for dim in range(flow_stack.shape[0])
+                flow_stack[dim][indices].mean() * scales[-1 - dim]
+                for dim in range(n_dims)
             ]
             res_spots.append(
                 {
                     'id': spot_id,
                     'pos': [
                         pos[dim] + displacement[dim]
-                        for dim in range(flow_stack.shape[0])
-                    ],
+                        for dim in range(n_dims)
+                    ] + ([0, ] if n_dims == 2 else []),
                     'sqdisp': sum([
                         displacement[dim]**2
-                        for dim in range(flow_stack.shape[0])
+                        for dim in range(n_dims)
                     ]),
                 }
             )

@@ -350,13 +350,13 @@ class FlowDatasetZarr(du.Dataset):
                 ])
             else:
                 img_input = np.array([
-                    [rotate(
+                    rotate(
                         img_input[c],
                         theta,
                         resize=True,
                         preserve_range=True,
                         order=1,  # 1: Bi-linear (default)
-                    )] for c in range(img_input.shape[0])
+                    ) for c in range(img_input.shape[0])
                 ])
             # rotate label
             if self.n_dims == 3:
@@ -372,13 +372,13 @@ class FlowDatasetZarr(du.Dataset):
                 ])
             else:
                 img_label = np.array([
-                    [rotate(
+                    rotate(
                         img_label[c],
                         theta,
                         resize=True,
                         preserve_range=True,
                         order=0,  # 0: Nearest-neighbor
-                    )] for c in range(img_label.shape[0])
+                    ) for c in range(img_label.shape[0])
                 ])
             # update flow label (y axis is inversed in the image coordinate)
             cos_theta = math.cos(math.radians(theta))
@@ -404,10 +404,10 @@ class FlowDatasetZarr(du.Dataset):
                 ) for i in range(self.n_dims)
             ]
             # scale labels by resize factor
-            img_label[0] *= self.crop_size[2] / item_crop_size[2]  # X
-            img_label[1] *= self.crop_size[1] / item_crop_size[1]  # Y
+            img_label[0] *= self.crop_size[-1] / item_crop_size[-1]  # X
+            img_label[1] *= self.crop_size[-2] / item_crop_size[-2]  # Y
             if self.n_dims == 3:
-                img_label[2] *= self.crop_size[0] / item_crop_size[0]  # Z
+                img_label[2] *= self.crop_size[-3] / item_crop_size[-3]  # Z
         else:
             item_crop_size = self.crop_size
         index_pool = np.argwhere(0 < img_label[-1])
@@ -433,7 +433,8 @@ class FlowDatasetZarr(du.Dataset):
                     tensor_label = F.interpolate(tensor_label[None].float(),
                                                  self.crop_size,
                                                  mode='nearest')
-                    tensor_label = tensor_label.view((4,) + self.crop_size)
+                    tensor_label = tensor_label.view(
+                        (self.n_dims + 1,) + self.crop_size)
                 # Second screening
                 if tensor_label[-1].max() != 0:
                     break

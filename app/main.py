@@ -162,10 +162,10 @@ def _update_flow_labels(spots_dict,
                         zpath_flow_label,
                         flow_norm_factor):
     za_label = zarr.open(zpath_flow_label, mode='a')
+    MIN_AREA_ELLIPSOID = 9
     n_dims = len(za_label.shape) - 2
     for t, spots in spots_dict.items():
         label = np.zeros(za_label.shape[1:], dtype='float32')
-        MIN_AREA_ELLIPSOID = 9
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
                 print('aborted')
@@ -176,32 +176,21 @@ def _update_flow_labels(spots_dict,
             covariance = covariance[-n_dims:, -n_dims:]
             radii, rotation = np.linalg.eigh(covariance)
             radii = np.sqrt(radii)
-            if n_dims == 3:
-                dd, rr, cc = ellipsoid(centroid,
-                                       radii,
-                                       rotation,
-                                       scales,
-                                       label.shape[-3:],
-                                       MIN_AREA_ELLIPSOID)
-            else:
-                rr, cc = ellipse(centroid[-2:],
-                                 radii[-2:],
-                                 rotation[-2:, -2:],
-                                 label.shape[-2:],
-                                 MIN_AREA_ELLIPSOID)
+            draw_func = ellipsoid if n_dims == 3 else ellipse
+            indices = draw_func(
+                centroid,
+                radii,
+                rotation,
+                scales,
+                label.shape[-n_dims:],
+                MIN_AREA_ELLIPSOID
+            )
             weight = 1  # if spot['tag'] in ['tp'] else false_weight
             displacement = spot['displacement']  # X, Y, Z
             for i in range(n_dims):
-                if n_dims == 3:
-                    label[i, dd, rr, cc] = (
-                        displacement[i] / scales[-1 - i] / flow_norm_factor[i])
-                else:
-                    label[i, rr, cc] = (
-                        displacement[i] / scales[-1 - i] / flow_norm_factor[i])
-            if n_dims == 3:
-                label[-1, dd, rr, cc] = weight  # last channels is for weight
-            else:
-                label[-1, rr, cc] = weight  # last channels is for weight
+                label[i][indices] = (
+                    displacement[i] / scales[-1 - i] / flow_norm_factor[i])
+            label[-1][indices] = weight  # last channels is for weight
         print('frame:{}, {} linkings'.format(t + 1, len(spots)))
         za_label[t] = label
     return jsonify({'completed': True})
@@ -265,7 +254,6 @@ def train_flow():
     req_json['device'] = device()
     config = FlowTrainConfig(req_json)
     print(config)
-    input_shape = zarr.open(config.zpath_input, mode='r').shape[-3:]
     spots_dict = collections.defaultdict(list)
     for spot in req_json.get('spots'):
         spots_dict[spot['t']].append(spot)
@@ -298,6 +286,8 @@ def train_flow():
                             config.scales,
                             config.zpath_flow_label,
                             config.flow_norm_factor)
+        n_dims = 2 + config.is_3d  # 3 or 2
+        input_shape = zarr.open(config.zpath_input, mode='r').shape[-n_dims:]
         train_dataset = FlowDatasetZarr(
             config.zpath_input,
             config.zpath_flow_label,
@@ -310,7 +300,7 @@ def train_flow():
             rotation_angle=config.rotation_angle,
         )
         if 0 < len(train_dataset):
-            loss = FlowLoss().to(config.device)
+            loss = FlowLoss(is_3d=config.is_3d).to(config.device)
             optimizers = [torch.optim.Adam(
                 model.parameters(), lr=config.lr) for model in models]
             logger = TensorBoard(config.log_dir)

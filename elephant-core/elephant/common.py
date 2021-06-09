@@ -542,7 +542,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
     assert n_dims == 2 or n_dims == 3, (
         f'n_dims: len(c_probs.shape) shoud be 2 or 3 but got {n_dims}'
     )
-    origins = crop_box[:n_dims] if crop_box is not None else (0,) * n_dims
+    origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
     labels = skimage.measure.label(p_thresh < c_probs)
     regions = skimage.measure.regionprops(labels, c_probs)
 

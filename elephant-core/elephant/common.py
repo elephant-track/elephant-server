@@ -30,6 +30,7 @@ import json
 import math
 from operator import mul
 import os
+from pathlib import Path
 import shutil
 import tempfile
 import time
@@ -722,6 +723,7 @@ def init_seg_models(config):
                   loss_fn=loss,
                   epoch=i,
                   log_interval=1)
+    Path(config.model_path).parent.mkdir(parents=True, exist_ok=True)
     torch.save(models[0].state_dict() if len(models) == 1 else [
         model.state_dict() for model in models], config.model_path)
     return models
@@ -733,6 +735,7 @@ def init_flow_models(config):
         device=config.device,
         is_3d=config.is_3d,
     ) for i in range(config.n_models)]
+    Path(config.model_path).parent.mkdir(parents=True, exist_ok=True)
     torch.save(models[0].state_dict() if len(models) == 1 else [
         model.state_dict() for model in models], config.model_path)
     return models

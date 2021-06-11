@@ -402,12 +402,14 @@ def detect_spots(config):
             slice(None)
             for i in range(0 if config.is_3d else 1, 3)
         )
-        dims_order = [1, 2, 0]
-        if config.is_3d:
-            dims_order.insert(2, 3)
-        za_seg[config.timepoint][slices_crop] = (np.transpose(prediction,
-                                                              dims_order)
-                                                 .astype('float16'))
+        if config.is_3d:  # 3D
+            dims_order = [1, 2, 3, 0]
+        else:  # 2D
+            # slices_crop = (0,) + slices_crop
+            dims_order = [1, 2, 0]
+        slices_crop = (config.timepoint,) + slices_crop
+        za_seg[slices_crop] = (np.transpose(prediction, dims_order)
+                               .astype('float16'))
 
     return spots
 

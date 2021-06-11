@@ -115,7 +115,7 @@ def main():
         str(p / 'seg_outputs.zarr'),
         'w',
         shape=(len(timepoints),) + shape + (3,),
-        chunks=(1, 1,) + shape[1:] + (3,),
+        chunks=(1,) + shape + (3,),
         dtype='f2'
     )
     zarr.open(
@@ -128,7 +128,7 @@ def main():
         str(p / 'seg_labels_vis.zarr'),
         'w',
         shape=(len(timepoints),) + shape + (3,),
-        chunks=(1, 1,) + shape[1:] + (3,),
+        chunks=(1,) + shape + (3,),
         dtype='u1'
     )
     dtype = np.uint16 if args.is_uint16 else np.uint8

@@ -632,6 +632,8 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     timepoints = set([*range(config.t_start, config.t_end + 1, 1)])
     is_zip = config.savedir is None
     savedir = tempfile.mkdtemp() if is_zip else config.savedir
+    n_dims = 2 + config.is_3d  # 3 or 2
+    digits = max(3, len(str(max(list(spots_dict.keys())))))
     for t, spots in spots_dict.items():
         if (redis_c is not None and
                 int(redis_c.get(REDIS_KEY_STATE)) == TrainState.IDLE.value):
@@ -643,28 +645,31 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
         for i in range(16):
             for spot in spots:
                 centroid = np.array(spot['pos'][::-1])
+                centroid = centroid[-n_dims:]
                 covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
+                covariance = covariance[-n_dims:, -n_dims:]
                 radii, rotation = np.linalg.eigh(covariance)
                 radii = np.sqrt(radii)
-                dd_outer, rr_outer, cc_outer = ellipsoid(
+                draw_func = ellipsoid if n_dims == 3 else ellipse
+                indices = draw_func(
                     centroid,
                     radii * (1 - 0.05 * i),
                     rotation,
                     config.scales,
-                    label.shape,
+                    label.shape[-n_dims:],
                     MIN_AREA_ELLIPSOID
                 )
-                label[dd_outer, rr_outer, cc_outer] = spot['value']
+                label[indices] = spot['value']
         # ensure that each spot is labeled at least its center voxcel
         for spot in spots:
             centroid = np.array(spot['pos'][::-1])
-            dd_center = int(centroid[0] / config.scales[0])
-            rr_center = int(centroid[1] / config.scales[1])
-            cc_center = int(centroid[2] / config.scales[2])
-            label[dd_center, rr_center, cc_center] = spot['value']
+            centroid = centroid[-n_dims:]
+            indices_center = tuple(int(centroid[i] / config.scales[i])
+                                   for i in range(n_dims))
+            label[indices_center] = spot['value']
         skimage.io.imsave(
-            os.path.join(savedir, f'mask{t:03d}.tif'),
-            label[:, None],
+            os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
+            label[:, None] if config.is_3d else label,
             imagej=True,
             compress=6,
         )
@@ -673,8 +678,8 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     label = np.zeros(config.shape, np.uint16)
     for t in timepoints:
         skimage.io.imsave(
-            os.path.join(savedir, f'mask{t:03d}.tif'),
-            label[:, None],
+            os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
+            label[:, None] if config.is_3d else label,
             imagej=True,
             compress=6,
         )

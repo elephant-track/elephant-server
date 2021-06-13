@@ -55,52 +55,46 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', help='seg | flow')
     parser.add_argument('config', help='config file')
+    parser.add_argument('--baseconfig', help='base config file')
     args = parser.parse_args()
     if args.command not in ['seg', 'flow']:
         print('command option should be "seg" or "flow"')
         parser.print_help()
         exit(1)
+    base_config_dict = dict()
+    if args.baseconfig is not None:
+        with io.open(args.baseconfig, 'r', encoding='utf-8') as jsonfile:
+            base_config_dict.update(json.load(jsonfile))
     with io.open(args.config, 'r', encoding='utf-8') as jsonfile:
         config_data = json.load(jsonfile)
     # load or initialize models
-    config = ResetConfig(config_data[0])
-    try:
-        if args.command == 'seg':
-            models = load_seg_models(config.model_path,
-                                     config.keep_axials,
-                                     config.device,
-                                     is_3d=config.is_3d)
-        elif args.command == 'flow':
-            models = load_flow_models(config.model_path,
-                                      config.keep_axials,
-                                      config.device,
-                                      is_3d=config.is_3d)
-    except Exception:
-        try:
-            if args.command == 'seg':
-                models = init_seg_models(config)
-            elif args.command == 'flow':
-                models = init_flow_models(config)
-        finally:
-            gc.collect()
-            torch.cuda.empty_cache()
+
     # prepare dataset
     train_datasets = []
     eval_datasets = []
     for i in range(len(config_data)):
-        input_shape = zarr.open(config.zpath_input, mode='r').shape[-3:]
+        config_dict = base_config_dict.copy()
+        config_dict.update(config_data[i])
+        config = ResetConfig(config_dict)
+        n_dims = 2 + config.is_3d  # 3 or 2
+        models = load_models(config, args.command)
+        za_input = zarr.open(config.zpath_input, mode='r')
+        input_shape = za_input.shape[-n_dims:]
         train_index = []
         eval_index = []
-        eval_interval = config_data[i].get('evalinterval')
+        eval_interval = config_dict.get('evalinterval')
+        t_min = config_dict.get('t_min', 0)
+        t_max = config_dict.get('t_max', za_input.shape[0] - 1)
         for ti, t in enumerate(range(
-                config_data[i].get('t_min'),
-                config_data[i].get('t_max') + (args.command == 'seg'))):
+                t_min,
+                t_max + (args.command == 'seg'))):
             if eval_interval is not None and (ti + 1) % eval_interval == 0:
                 eval_index.append(t)
             else:
                 train_index.append(t)
         if args.command == 'seg':
-            config = SegmentationTrainConfig(config_data[i])
+            config = SegmentationTrainConfig(config_dict)
+            print(config)
             train_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
                 config.zpath_seg_label,
@@ -110,19 +104,20 @@ def main():
                 config.n_crops,
                 scales=config.scales,
                 scale_factor_base=config.scale_factor_base,
+                contrast=config.contrast,
+                rotation_angle=config.rotation_angle,
             ))
             eval_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
                 config.zpath_seg_label,
                 eval_index,
                 input_shape,
-                config.crop_size,
-                config.n_crops,
-                scales=config.scales,
-                scale_factor_base=0.0,
+                input_shape,
+                1,
+                is_eval=True,
             ))
         elif args.command == 'flow':
-            config = FlowTrainConfig(config_data[i])
+            config = FlowTrainConfig(config_dict)
             train_datasets.append(FlowDatasetZarr(
                 config.zpath_input,
                 config.zpath_flow_label,
@@ -132,6 +127,7 @@ def main():
                 config.n_crops,
                 scales=config.scales,
                 scale_factor_base=config.scale_factor_base,
+                rotation_angle=config.rotation_angle,
             ))
             eval_datasets.append(FlowDatasetZarr(
                 config.zpath_input,
@@ -158,9 +154,9 @@ def main():
         optimizers = [torch.optim.Adam(
             model.parameters(), lr=config.lr) for model in models]
         train_loader = DataLoader(
-            train_dataset, shuffle=True, batch_size=1)
+            train_dataset, shuffle=True, batch_size=config.batch_size)
         eval_loader = DataLoader(
-            eval_dataset, shuffle=False, batch_size=1)
+            eval_dataset, shuffle=False, batch_size=config.batch_size)
         min_loss = float('inf')
         for epoch in range(config.n_epochs):
             if args.command == 'flow' and epoch == 50:
@@ -176,7 +172,7 @@ def main():
                       optimizer=optimizer,
                       loss_fn=loss_fn,
                       epoch=epoch,
-                      log_interval=100,
+                      log_interval=max(1, 100 // config.batch_size),
                       tb_logger=logger)
                 if 0 < len(eval_loader):
                     loss += evaluate(model,
@@ -185,15 +181,54 @@ def main():
                                      loss_fn=loss_fn,
                                      epoch=epoch,
                                      tb_logger=logger)
-            if 0 < len(eval_loader) and loss < min_loss:
-                min_loss = loss
-                torch.save(models[0].state_dict() if len(models) == 1 else
-                           [model.state_dict() for model in models],
-                           config.model_path.replace('.pth', '_best.pth'))
-
+            loss /= len(models)
+            if 0 < len(eval_loader):
+                if loss < min_loss:
+                    min_loss = loss
+                    state_dicts = (models[0].state_dict() if len(models) == 1
+                                   else
+                                   [model.state_dict() for model in models])
+                    torch.save(state_dicts,
+                               config.model_path.replace('.pth', '_best.pth'))
+                    if len(models) == 1:
+                        state_dicts = [state_dicts]
+                else:
+                    for model, state_dict in zip(models, state_dicts):
+                        model.load_state_dict(state_dict)
             torch.save(models[0].state_dict() if len(models) == 1 else
                        [model.state_dict() for model in models],
                        config.model_path)
+
+
+def load_models(config, command):
+    """ load or initialize models
+    Args:
+        config: config object
+        command: 'seg' or 'flow'
+    Returns:
+        models: loaded or initialized models
+    """
+    try:
+        if command == 'seg':
+            models = load_seg_models(config.model_path,
+                                     config.keep_axials,
+                                     config.device,
+                                     is_3d=config.is_3d)
+        elif command == 'flow':
+            models = load_flow_models(config.model_path,
+                                      config.keep_axials,
+                                      config.device,
+                                      is_3d=config.is_3d)
+    except Exception:
+        try:
+            if command == 'seg':
+                models = init_seg_models(config)
+            elif command == 'flow':
+                models = init_flow_models(config)
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
+    return models
 
 
 if __name__ == '__main__':

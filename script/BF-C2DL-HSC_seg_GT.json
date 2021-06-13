@@ -1,0 +1,12 @@
+[
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/01_seg_GT",
+        "model_name": "ISBI2021/BF-C2DL-HSC/seg_GT.pth",
+        "log_dir": "ISBI2021/BF-C2DL-HSC_seg_GT"
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/02_seg_GT",
+        "model_name": "ISBI2021/BF-C2DL-HSC/seg_GT.pth",
+        "log_dir": "ISBI2021/BF-C2DL-HSC_seg_GT"
+    }
+]

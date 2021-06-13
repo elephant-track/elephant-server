@@ -1,0 +1,12 @@
+[
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/01_seg_ST",
+        "model_name": "ISBI2021/DIC-C2DH-HeLa/seg_ST.pth",
+        "log_dir": "ISBI2021/DIC-C2DH-HeLa_seg_ST"
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/02_seg_ST",
+        "model_name": "ISBI2021/DIC-C2DH-HeLa/seg_ST.pth",
+        "log_dir": "ISBI2021/DIC-C2DH-HeLa_seg_ST"
+    }
+]

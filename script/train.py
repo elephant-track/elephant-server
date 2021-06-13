@@ -88,7 +88,10 @@ def main():
         for ti, t in enumerate(range(
                 t_min,
                 t_max + (args.command == 'seg'))):
-            if eval_interval is not None and (ti + 1) % eval_interval == 0:
+            if eval_interval is not None and eval_interval == -1:
+                train_index.append(t)
+                eval_index.append(t)
+            elif eval_interval is not None and (ti + 1) % eval_interval == 0:
                 eval_index.append(t)
             else:
                 train_index.append(t)

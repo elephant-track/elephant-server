@@ -64,16 +64,18 @@ class BaseConfig():
         self.debug = config.get('debug', False)
         self.output_prediction = config.get('output_prediction', False)
         self.is_3d = config.get('is_3d', True)
+        self.batch_size = config.get('batch_size', 1)
         self.patch_size = config.get('patch')
         if self.patch_size is not None:
             self.patch_size = self.patch_size[::-1]
         if config.get('scales') is not None:
             self.scales = config.get('scales')[::-1]
-        if config.get('n_keep_axials') is not None:
-            # U-Net has 4 downsamplings
-            n_keep_axials = min(4, config.get('n_keep_axials'))
-            self.keep_axials = tuple(True if i < n_keep_axials else False
-                                     for i in range(4))
+        else:
+            self.scales = None
+        # U-Net has 4 downsamplings
+        n_keep_axials = min(4, config.get('n_keep_axials', 4))
+        self.keep_axials = tuple(True if i < n_keep_axials else False
+                                 for i in range(4))
         self.crop_size = config.get('crop_size', DEFAULT_CROP_SIZE)[::-1]
         if not self.is_3d:
             if self.patch_size is not None:
@@ -153,6 +155,10 @@ class SegmentationTrainConfig(SegmentationEvalConfig):
         self.auto_bg_thresh = config.get('auto_bg_thresh')
         self.scale_factor_base = config.get('aug_scale_factor_base')
         self.rotation_angle = config.get('aug_rotation_angle')
+        self.contrast = config.get('aug_contrast', 0)
+        if self.contrast < 0 or 1 < self.contrast:
+            raise ValueError(
+                f'contrast should be in [0, 1] but got {self.contrast}')
         self.class_weights = config.get('class_weights',
                                         DEFAULT_SEG_CLASS_WEIGHTS)
         self.false_weight = config.get('false_weight')

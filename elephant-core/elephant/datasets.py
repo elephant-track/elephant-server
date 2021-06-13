@@ -49,7 +49,7 @@ class SegmentationDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_seg_label, indices, img_size,
                  crop_size, n_crops, scales=None, is_livemode=False,
                  redis_client=None, scale_factor_base=0.2, is_ae=False,
-                 rotation_angle=None):
+                 rotation_angle=None, contrast=0.5, is_eval=False):
         if len(img_size) != len(crop_size):
             raise ValueError(
                 'img_size: {} and crop_size: {} should have the same length'
@@ -94,6 +94,8 @@ class SegmentationDatasetZarr(du.Dataset):
                 redis_client.set(REDIS_KEY_NCROPS, str(n_crops))
                 self.redis_c = redis_client
         self.rotation_angle = rotation_angle
+        self.contrast = contrast
+        self.is_eval = is_eval
 
     def __len__(self):
         if self.is_ae:
@@ -139,7 +141,11 @@ class SegmentationDatasetZarr(du.Dataset):
                 'positive weight should exist in the label'
             )
         img_input = normalize_zero_one(za_input[i_frame].astype('float32'))
-        if not self.is_ae:
+        if self.is_eval:
+            tensor_input = torch.from_numpy(img_input[None])
+            tensor_label = torch.from_numpy(img_label - 1).long()
+            return tensor_input, tensor_label
+        if not self.is_ae and self.contrast:
             fg_index = np.isin(img_label, (1, 2, 4, 5))
             bg_index = np.isin(img_label, (0, 3))
             if fg_index.any() and bg_index.any():

@@ -22,6 +22,7 @@ RUN conda install --override-channels -c main -c conda-forge \
     h5py=2.10.0 \
     flask=1.1.2 \
     flask-redis=0.4.0 \
+    imagecodecs=2021.3.31 \
     libiconv=1.15 \
     pika=1.1.0 \
     scikit-learn=0.23.1 \

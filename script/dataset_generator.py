@@ -134,7 +134,7 @@ def main():
     dtype = np.uint16 if args.is_uint16 else np.uint8
     for timepoint in tqdm(timepoints):
         # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
-        def func(x): return x[0] if args.is_2d else lambda x: x
+        def func(x): return x[0] if args.is_2d else x
         img[int(timepoint[1:])] = (
             np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
         ).astype(dtype)

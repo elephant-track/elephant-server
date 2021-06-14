@@ -29,6 +29,7 @@ import argparse
 import io
 import json
 from pathlib import Path
+import re
 
 import numpy as np
 import skimage.draw
@@ -68,11 +69,17 @@ def main():
                 if p_seg.exists():
                     for f in p_seg.glob('*.tif'):
                         if shape is None:
+                            t = re.findall(r'(\d+)', f.name)[0]
                             img = skimage.io.imread(
-                                str(p / f'0{i+1}' /
-                                    f.name.replace('man_seg', 't'))
+                                str(p / f'0{i+1}' / f't{t}.tif')
                             )
-                            shape = img.shape
+                            n_dims = len(img.shape)
+                            print(f'found {n_dims}D data')
+                            if n_dims not in (2, 3):
+                                raise ValueError(
+                                    'image dimension should be 2 or 3'
+                                )
+                            shape = img.shape[-2:]
                             dtype = img.dtype
                         unique_files.add(f.name)
             if len(unique_files) == 0:
@@ -107,12 +114,22 @@ def main():
             for ref_type in ref_types:
                 p_seg = p / f'0{i+1}_{ref_type}' / 'SEG'
                 if (p_seg).exists():
+                    last_t = -1
                     for f in tqdm(sorted(p_seg.glob('*.tif'))):
                         if f.name not in visited_files:
-                            za_img[count] = skimage.io.imread(
-                                str(p / f'0{i+1}' /
-                                    f.name.replace('man_seg', 't'))
-                            )
+                            t = re.findall(r'(\d+)', f.name)[0]
+                            if n_dims == 2:
+                                za_img[count] = skimage.io.imread(
+                                    str(p / f'0{i+1}' / f't{t}.tif')
+                                )
+                            else:
+                                z = int(re.findall(r'(\d+)', f.name)[1])
+                                if t != last_t:
+                                    img_cache = skimage.io.imread(
+                                        str(p / f'0{i+1}' / f't{t}.tif')
+                                    )
+                                    last_t = t
+                                za_img[count] = img_cache[z]
                             label = skimage.io.imread(str(f))
                             if (ref_type == 'GT' and
                                     f.name in sparse_data.get(f'0{i+1}', [])):
@@ -121,6 +138,8 @@ def main():
                                 seg = np.ones(label.shape, dtype=np.uint8)
                             regions = skimage.measure.regionprops(label)
                             for region in regions:
+                                if region.minor_axis_length == 0:
+                                    continue
                                 factor = 0.5
                                 while True:
                                     indices_outer = skimage.draw.ellipse(

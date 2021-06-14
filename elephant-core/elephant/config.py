@@ -64,6 +64,7 @@ class BaseConfig():
         self.debug = config.get('debug', False)
         self.output_prediction = config.get('output_prediction', False)
         self.is_3d = config.get('is_3d', True)
+        self.use_2d = config.get('use_2d', False)
         self.batch_size = config.get('batch_size', 1)
         self.patch_size = config.get('patch')
         if self.patch_size is not None:

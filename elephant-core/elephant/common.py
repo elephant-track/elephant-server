@@ -311,7 +311,7 @@ def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
     img = img.astype('float32')
     n_dims = len(img.shape)
     is_3d = n_dims == 3
-    if use_median:
+    if is_3d and use_median:
         global_median = np.median(img)
         for z in range(img.shape[0]):
             slice_median = np.median(img[z])
@@ -369,15 +369,29 @@ def detect_spots(config):
         za_input = zarr.open(config.zpath_input, mode='a')
         img_input = za_input[config.timepoint]
     try:
-        prediction = _get_seg_prediction(img_input,
-                                         config.timepoint,
-                                         config.model_path,
-                                         config.keep_axials,
-                                         config.device,
-                                         config.use_median,
-                                         config.patch_size,
-                                         config.crop_box,
-                                         config.is_pad)
+        if len(img_input.shape) == 3 and config.use_2d:
+            prediction = np.swapaxes(np.array([
+                _get_seg_prediction(img_input[z],
+                                    config.timepoint,
+                                    config.model_path,
+                                    config.keep_axials,
+                                    config.device,
+                                    config.use_median,
+                                    config.patch_size[-2:],
+                                    config.crop_box,
+                                    config.is_pad)
+                for z in range(img_input.shape[0])
+            ]), 0, 1)
+        else:
+            prediction = _get_seg_prediction(img_input,
+                                             config.timepoint,
+                                             config.model_path,
+                                             config.keep_axials,
+                                             config.device,
+                                             config.use_median,
+                                             config.patch_size,
+                                             config.crop_box,
+                                             config.is_pad)
     except Exception:
         print(traceback.format_exc())
     finally:
@@ -392,7 +406,8 @@ def detect_spots(config):
                          p_thresh=config.p_thresh,
                          r_min=config.r_min,
                          r_max=config.r_max,
-                         crop_box=config.crop_box)
+                         crop_box=config.crop_box,
+                         use_2d=config.use_2d)
 
     if config.output_prediction and config.zpath_seg_output is not None:
         za_seg = zarr.open(config.zpath_seg_output, mode='a')
@@ -555,7 +570,8 @@ def spots_with_flow(config, spots):
 
 
 def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
-                         p_thresh=0.3, r_min=0, r_max=1e6, crop_box=None):
+                         p_thresh=0.3, r_min=0, r_max=1e6, crop_box=None,
+                         use_2d=False):
     n_dims = len(c_probs.shape)
     assert n_dims == 2 or n_dims == 3, (
         f'n_dims: len(c_probs.shape) shoud be 2 or 3 but got {n_dims}'
@@ -589,6 +605,8 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
         # correction for floor effect duriing label generation
         c_scales = [scales[i] * (bbox_shape[i] + 1.) / bbox_shape[i]
                     for i in range(n_dims)]
+        if use_2d and n_dims == 3:
+            c_scales[0] *= c_ratio
         moments_central = scaled_moments_central(
             region.image, c_scales, order=2)
         cov = moments_central[idx].reshape((n_dims, n_dims))
@@ -633,7 +651,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     timepoints = set([*range(config.t_start, config.t_end + 1, 1)])
     is_zip = config.savedir is None
     savedir = tempfile.mkdtemp() if is_zip else config.savedir
-    n_dims = 2 + config.is_3d  # 3 or 2
+    n_dims = len(config.shape)
     digits = max(3, len(str(max(list(spots_dict.keys())))))
     for t, spots in spots_dict.items():
         if (redis_c is not None and
@@ -670,7 +688,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
             label[indices_center] = spot['value']
         skimage.io.imsave(
             os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
-            label[:, None] if config.is_3d else label,
+            label[:, None] if n_dims == 3 else label,
             imagej=True,
             compress=6,
         )
@@ -680,7 +698,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     for t in timepoints:
         skimage.io.imsave(
             os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
-            label[:, None] if config.is_3d else label,
+            label[:, None] if n_dims == 3 else label,
             imagej=True,
             compress=6,
         )

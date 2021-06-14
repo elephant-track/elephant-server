@@ -85,6 +85,8 @@ def main():
         eval_interval = config_dict.get('evalinterval')
         t_min = config_dict.get('t_min', 0)
         t_max = config_dict.get('t_max', za_input.shape[0] - 1)
+        train_length = config_dict.get('train_length')
+        eval_length = config_dict.get('eval_length')
         for ti, t in enumerate(range(
                 t_min,
                 t_max + (args.command == 'seg'))):
@@ -109,6 +111,7 @@ def main():
                 scale_factor_base=config.scale_factor_base,
                 contrast=config.contrast,
                 rotation_angle=config.rotation_angle,
+                length=train_length,
             ))
             eval_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
@@ -118,6 +121,7 @@ def main():
                 input_shape,
                 1,
                 is_eval=True,
+                length=eval_length,
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)

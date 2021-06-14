@@ -49,7 +49,8 @@ class SegmentationDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_seg_label, indices, img_size,
                  crop_size, n_crops, scales=None, is_livemode=False,
                  redis_client=None, scale_factor_base=0.2, is_ae=False,
-                 rotation_angle=None, contrast=0.5, is_eval=False):
+                 rotation_angle=None, contrast=0.5, is_eval=False,
+                 length=None):
         if len(img_size) != len(crop_size):
             raise ValueError(
                 'img_size: {} and crop_size: {} should have the same length'
@@ -96,8 +97,11 @@ class SegmentationDatasetZarr(du.Dataset):
         self.rotation_angle = rotation_angle
         self.contrast = contrast
         self.is_eval = is_eval
+        self.length = length
 
     def __len__(self):
+        if self.length is not None:
+            return self.length
         if self.is_ae:
             return self.n_crops
         if self.is_livemode:
@@ -131,6 +135,8 @@ class SegmentationDatasetZarr(du.Dataset):
                     if (int(self.redis_c.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
                         return torch.tensor(-100.), torch.tensor(-100)
+            elif self.length is not None:
+                i_frame = np.random.choice(self.indices)
             else:
                 i_frame = self.indices[index // self.n_crops]
 

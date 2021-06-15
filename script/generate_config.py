@@ -65,7 +65,7 @@ def main():
         'Fluo-N3DH-CHO-01': '0.202, 0.202, 1.0',
         'Fluo-N3DH-CHO-02': '0.202, 0.202, 1.0',
     }
-    dataset = [
+    datasets = [
         'BF-C2DL-HSC',
         'BF-C2DL-MuSC',
         'DIC-C2DH-HeLa',
@@ -87,7 +87,7 @@ def main():
     p_train.mkdir(exist_ok=True, parents=True)
     p_entry = p / 'entry_files'
     p_entry.mkdir(exist_ok=True, parents=True)
-    for dataset in dataset:
+    for dataset in datasets:
         for cfg in ('GT', 'ST', 'GT+ST', 'allGT', 'allST', 'allGT+allST'):
             if 'all' not in cfg:
                 # train config
@@ -113,6 +113,7 @@ def main():
                 result = src.substitute({
                     'modelbase': modelbase,
                     'scales': scale_dict[f'{dataset}-{seq}'],
+                    'is_3d': str('3D' in dataset).lower(),
                 })
                 with open(str(p_run / f'{basename}.json'), 'w') as f:
                     f.write(result)

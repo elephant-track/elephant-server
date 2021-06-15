@@ -1,6 +1,6 @@
 [
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01_seg_GT",
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01_seg_ST",
         "model_name": "ISBI2021/Fluo-C3DH-A549-ST-seg.pth",
         "log_dir": "ISBI2021/Fluo-C3DH-A549-ST-seg",
         "evalinterval": -1,
@@ -9,7 +9,7 @@
         "adaptive_length": true
     },
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02_seg_GT",
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02_seg_ST",
         "model_name": "ISBI2021/Fluo-C3DH-A549-ST-seg.pth",
         "log_dir": "ISBI2021/Fluo-C3DH-A549-ST-seg",
         "evalinterval": -1,

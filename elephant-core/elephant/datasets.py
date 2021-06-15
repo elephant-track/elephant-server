@@ -50,7 +50,7 @@ class SegmentationDatasetZarr(du.Dataset):
                  crop_size, n_crops, scales=None, is_livemode=False,
                  redis_client=None, scale_factor_base=0.2, is_ae=False,
                  rotation_angle=None, contrast=0.5, is_eval=False,
-                 length=None):
+                 length=None, adaptive_length=False):
         if len(img_size) != len(crop_size):
             raise ValueError(
                 'img_size: {} and crop_size: {} should have the same length'
@@ -94,6 +94,9 @@ class SegmentationDatasetZarr(du.Dataset):
                 assert redis_client is not None
                 redis_client.set(REDIS_KEY_NCROPS, str(n_crops))
                 self.redis_c = redis_client
+            if (adaptive_length and (length is not None) and
+                    (len(indices) <= length)):
+                length = None
         self.rotation_angle = rotation_angle
         self.contrast = contrast
         self.is_eval = is_eval

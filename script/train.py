@@ -87,6 +87,7 @@ def main():
         t_max = config_dict.get('t_max', za_input.shape[0] - 1)
         train_length = config_dict.get('train_length')
         eval_length = config_dict.get('eval_length')
+        adaptive_length = config_dict.get('adaptive_length', False)
         for ti, t in enumerate(range(
                 t_min,
                 t_max + (args.command == 'seg'))):
@@ -122,6 +123,7 @@ def main():
                 1,
                 is_eval=True,
                 length=eval_length,
+                adaptive_length=adaptive_length,
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)

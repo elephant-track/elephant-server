@@ -1,0 +1,17 @@
+{
+    "01": [
+        "man_seg_001_022.tif",
+        "man_seg_008_029.tif",
+        "man_seg_016_021.tif",
+        "man_seg_021_024.tif",
+        "man_seg_029_031.tif",
+        "man_seg_032_031.tif",
+        "man_seg_049_033.tif",
+        "man_seg_050_033.tif",
+        "man_seg_054_032.tif"
+    ],
+    "02": [
+        "man_seg_001_021.tif",
+        "man_seg_038_045.tif"
+    ]
+}

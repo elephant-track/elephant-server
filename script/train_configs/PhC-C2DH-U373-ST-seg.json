@@ -1,0 +1,20 @@
+[
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/01_seg_GT",
+        "model_name": "ISBI2021/PhC-C2DH-U373-ST-seg.pth",
+        "log_dir": "ISBI2021/PhC-C2DH-U373-ST-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/02_seg_GT",
+        "model_name": "ISBI2021/PhC-C2DH-U373-ST-seg.pth",
+        "log_dir": "ISBI2021/PhC-C2DH-U373-ST-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    }
+]

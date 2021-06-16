@@ -4,7 +4,7 @@
     "scales": [
         ${scales}
     ],
-    "c_ratio": 0.5,
+    "c_ratio": ${c_ratio},
     "p_thresh": 0.8,
     "r_min": 1,
     "r_max": 50,

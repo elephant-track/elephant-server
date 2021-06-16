@@ -113,6 +113,7 @@ def main():
                 result = src.substitute({
                     'modelbase': modelbase,
                     'scales': scale_dict[f'{dataset}-{seq}'],
+                    'c_ratio': 0.3 if '3D' in dataset else 0.5,
                     'is_3d': str('3D' in dataset).lower(),
                 })
                 with open(str(p_run / f'{basename}.json'), 'w') as f:

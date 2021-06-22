@@ -92,7 +92,7 @@ def main():
             else:
                 raise ValueError(f'dtype {dtype} is not supported')
             print(zarr_shape, zarr_dtype)
-            p_root = Path.cwd() / f'0{i+1}-{suffix}-seg'
+            p_root = p / f'0{i+1}-{suffix}-seg'
             p_root.mkdir(exist_ok=True)
 
             za_img = zarr.open(

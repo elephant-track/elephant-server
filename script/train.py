@@ -166,8 +166,19 @@ def main():
             train_dataset, shuffle=True, batch_size=config.batch_size)
         eval_loader = DataLoader(
             eval_dataset, shuffle=False, batch_size=config.batch_size)
-        min_loss = float('inf')
-        for epoch in range(config.n_epochs):
+        if 0 < len(eval_loader):
+            min_loss = sum([evaluate(model,
+                                     config.device,
+                                     eval_loader,
+                                     loss_fn=loss_fn,
+                                     epoch=-1)
+                            for model in models]) / len(models)
+            state_dicts = ([models[0].state_dict()] if len(models) == 1
+                           else
+                           [model.state_dict() for model in models])
+
+        for epoch in range(config.epoch_start,
+                           config.epoch_start + config.n_epochs):
             if args.command == 'flow' and epoch == 50:
                 optimizers = [
                     torch.optim.Adam(model.parameters(), lr=config.lr*0.1)

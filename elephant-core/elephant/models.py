@@ -310,7 +310,7 @@ class FlowResNet(UNet):
 
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
                     is_decoder_only=False, is_pad=False, is_3d=True):
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(model_path, map_location=device)
     state_dicts = checkpoint if isinstance(checkpoint, list) else [checkpoint]
     # print(len(state_dicts), 'models will be ensembled')
     models = [UNet.three_class_segmentation(
@@ -327,7 +327,7 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
 
 def load_flow_models(model_path, keep_axials, device, is_eval=False,
                      is_decoder_only=False, is_pad=False, is_3d=True):
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(model_path, map_location=device)
     state_dicts = checkpoint if isinstance(checkpoint, list) else [checkpoint]
     # print(len(state_dicts), 'models will be ensembled')
     return [FlowResNet.three_dimensional_flow(

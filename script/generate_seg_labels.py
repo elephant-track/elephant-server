@@ -38,8 +38,6 @@ import skimage.measure
 from tqdm import tqdm
 import zarr
 
-from elephant.util.ellipse import ellipse
-
 
 def main():
     parser = argparse.ArgumentParser()

@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot
+.PHONY: help rebuild build launch bash bashroot warmup
 
 help:
 	@cat Makefile
@@ -25,12 +25,15 @@ stop:
 		$(ELEPHANT_DOCKER) stop $$CONTAINERID; \
 	fi
 
-launch:
+warmup:
+	$(ELEPHANT_DOCKER) run -it --rm --gpus all $(ELEPHANT_IMAGE_NAME) echo "warming up..."
+
+launch: warmup
 	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace -p 8080:80 -p 5672:5672 \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
 	$(ELEPHANT_IMAGE_NAME)
 
-bash:
+bash: warmup
 	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash

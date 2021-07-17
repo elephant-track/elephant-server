@@ -38,6 +38,7 @@ from flask import request
 from flask import send_file
 from flask_redis import FlaskRedis
 import numpy as np
+import nvsmi
 import pika
 import torch
 import torch.utils.data as du
@@ -785,6 +786,20 @@ def export_ctc():
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         redis_client.set(REDIS_KEY_STATE, state)
+    return resp
+
+
+@app.route('/gpus', methods=['GET'])
+def get_gpus():
+    gpus = []
+    for gpu in nvsmi.get_gpus():
+        gpus.append({
+            'id': gpu.id,
+            'name': gpu.name,
+            'mem_total': gpu.mem_total,
+            'mem_used': gpu.mem_used
+        })
+    resp = jsonify(gpus)
     return resp
 
 

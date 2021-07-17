@@ -33,6 +33,8 @@ RUN conda install --override-channels -c main -c conda-forge \
     uwsgi=2.0.18 \
     zarr=2.4.0
 
+RUN pip install nvsmi==0.4.2
+
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
 RUN chmod +x /tmp/install-rabbitmq.sh && /tmp/install-rabbitmq.sh && rm /tmp/install-rabbitmq.sh

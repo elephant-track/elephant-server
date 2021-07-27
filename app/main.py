@@ -27,6 +27,9 @@
 import collections
 import gc
 import os
+from pathlib import Path
+import shutil
+import tempfile
 import traceback
 import weakref
 
@@ -42,6 +45,7 @@ import nvsmi
 import pika
 import torch
 import torch.utils.data as du
+import werkzeug
 import zarr
 
 from elephant.common import TensorBoard
@@ -51,6 +55,7 @@ from elephant.common import init_flow_models
 from elephant.common import init_seg_models
 from elephant.common import spots_with_flow
 from elephant.common import train
+from elephant.config import DATASETS_DIR
 from elephant.config import ExportConfig
 from elephant.config import FlowEvalConfig
 from elephant.config import FlowTrainConfig
@@ -69,6 +74,7 @@ from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
+from elephant.tool import generate_dataset
 from elephant.util import normalize_zero_one
 from elephant.util import get_device
 from elephant.util.ellipse import ellipse
@@ -801,6 +807,82 @@ def get_gpus():
         })
     resp = jsonify(gpus)
     return resp
+
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    """ Upload an image data to the dataset directory. # noqa: E501
+
+    USE_CISTOM_STREAM is a memory-friendly (and faster) option.
+    See details:
+        https://github.com/pallets/flask/issues/2086
+    Code from:
+        https://gitlab.nsd.no/ire/python-webserver-file-submission-poc/blob/master/flask_app.py
+
+    Expected HTTP request:
+        POST /upload HTTP/1.1
+        Host: localhost:8080
+        Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+        Content-Length: <Content-Length here>
+
+        ----WebKitFormBoundary7MA4YWxkTrZu0gW
+        Content-Disposition: form-data; name="file"; filename="YOUR_IMAGE_FILE.h5"
+        Content-Type: <Content-Type header here>
+
+        (data)
+        ----WebKitFormBoundary7MA4YWxkTrZu0gW
+        Content-Disposition: form-data; name="dataset"
+
+        YOUR_DATASET_NAME
+        ----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+    """
+    print('new request')
+    USE_CUSTOM_STREAM = True
+    if USE_CUSTOM_STREAM:
+        tmpfile, tmpfile_path = tempfile.mkstemp(prefix='elephant')
+        with os.fdopen(tmpfile, 'w+b') as f:
+            def custom_stream_factory(total_content_length, filename,
+                                      content_type, content_length=None):
+                print(
+                    "start receiving file ... filename => " + tmpfile_path)
+                return f
+
+            _, form, files = werkzeug.formparser.parse_form_data(
+                request.environ, stream_factory=custom_stream_factory)
+        total_size = 0
+        num_files = 0
+
+        for fil in files.values():
+            total_size += os.path.getsize(tmpfile_path)
+            num_files += 1
+            p_file = Path(DATASETS_DIR) / form['dataset'] / fil.filename
+            if p_file.exists():
+                p_file.unlink()
+            shutil.move(tmpfile_path, str(p_file))
+            print(" ".join(
+                ["saved form name", fil.name, "submitted as",
+                    fil.filename, "to temporary file", str(p_file)])
+            )
+    else:
+        if 'file' not in request.files:
+            print('No file part')
+            return jsonify(res='No file part'), 400
+        file = request.files['file']
+        if file.filename == '':
+            print('No selected file')
+            return jsonify(res='No selected file'), 400
+        if not file.filename.endswith('.h5'):
+            print('Filename should ends with .h5')
+            return jsonify(res='Filename should ends with .h5'), 400
+        if 'dataset' not in request.form:
+            print('No dataset part')
+            return jsonify(res='No dataset part'), 400
+        p_file = Path(DATASETS_DIR) / request.form['dataset'] / file.filename
+        if p_file.exists():
+            p_file.unlink()
+        file.save(p_file)
+    return make_response('', 200)
 
 
 if __name__ == "__main__":

@@ -27,13 +27,8 @@
 """A script for generating .zarr files for the ELEPHANT server."""
 
 import argparse
-import re
-from pathlib import Path
 
-import h5py
-import numpy as np
-import zarr
-from tqdm import tqdm
+from elephant.tool import generate_dataset
 
 
 def parse_args():
@@ -55,6 +50,8 @@ def parse_args():
     )
     parser.add_argument(
         '--divisor',
+        type=float,
+        default=1.,
         help=('divide the original pixel values by this value ' +
               '(with uint8, the values should be scale-downed to 0-255)')
     )
@@ -70,74 +67,13 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(f'input: {args.input}')
-    print(f'output dir: {args.output}')
-    divisor = 1
-    if args.divisor:
-        print(f'divisor: {args.divisor}')
-        divisor = float(args.divisor)
-    f = h5py.File(args.input, 'r')
-    # timepoints are stored as 't00000', 't000001', ...
-    timepoints = list(filter(re.compile(r't\d{5}').search, list(f.keys())))
-    shape = f[timepoints[0]]['s00']['0']['cells'].shape
-    if args.is_2d:
-        shape = shape[-2:]
-    n_dims = 3 - args.is_2d  # 3 or 2
-    p = Path(args.output)
-    img = zarr.open(
-        str(p / 'imgs.zarr'),
-        'w',
-        shape=(len(timepoints),) + shape,
-        chunks=(1,) + shape,
-        dtype='u2' if args.is_uint16 else 'u1'
+    generate_dataset(
+        args.input,
+        args.output,
+        args.is_uint16,
+        args.divisor,
+        args.is_2d,
     )
-    zarr.open(
-        str(p / 'flow_outputs.zarr'),
-        'w',
-        shape=(len(timepoints) - 1, n_dims,) + shape,
-        chunks=(1, 1,) + shape,
-        dtype='f2'
-    )
-    zarr.open(
-        str(p / 'flow_hashes.zarr'),
-        'w', shape=(len(timepoints) - 1,),
-        chunks=(len(timepoints) - 1,),
-        dtype='S16'
-    )
-    zarr.open(
-        str(p / 'flow_labels.zarr'),
-        'w',
-        shape=(len(timepoints) - 1, n_dims + 1,) + shape,
-        chunks=(1, 1,) + shape,
-        dtype='f4'
-    )
-    zarr.open(
-        str(p / 'seg_outputs.zarr'),
-        'w',
-        shape=(len(timepoints),) + shape + (3,),
-        chunks=(1,) + shape + (3,),
-        dtype='f2'
-    )
-    zarr.open(
-        str(p / 'seg_labels.zarr'),
-        'w',
-        shape=(len(timepoints),) + shape,
-        chunks=(1,) + shape, dtype='u1'
-    )
-    zarr.open(
-        str(p / 'seg_labels_vis.zarr'),
-        'w',
-        shape=(len(timepoints),) + shape + (3,),
-        chunks=(1,) + shape + (3,),
-        dtype='u1'
-    )
-    dtype = np.uint16 if args.is_uint16 else np.uint8
-    for timepoint in tqdm(timepoints):
-        # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
-        def func(x): return x[0] if args.is_2d else x
-        img[int(timepoint[1:])] = (
-            np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
-        ).astype(dtype)
 
 
 if __name__ == '__main__':

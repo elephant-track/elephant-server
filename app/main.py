@@ -809,6 +809,31 @@ def get_gpus():
     return resp
 
 
+@app.route('/dataset', methods=['POST'])
+def gen_datset():
+    if request.headers['Content-Type'] != 'application/json':
+        return jsonify(res='error'), 400
+    req_json = request.get_json()
+    if not {'input', 'output'} <= req_json.keys():
+        return jsonify(
+            res='json should include the keys input and output'), 400
+    if not Path(req_json['input']).is_file():
+        return jsonify(
+            res=f'{req_json["input"]} does not exists'), 404
+    try:
+        generate_dataset(
+            req_json['input'],
+            req_json['output'],
+            req_json.get('is_uint16', False),
+            req_json.get('divisor', 1.),
+            req_json.get('is_2d', False),
+        )
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify(error=f'Exception: {e}'), 500
+    return make_response('', 200)
+
+
 @app.route('/upload', methods=['POST'])
 def upload():
     """ Upload an image data to the dataset directory. # noqa: E501

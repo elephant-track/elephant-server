@@ -28,7 +28,7 @@
 
 import argparse
 
-from elephant.tool import generate_dataset
+from elephant.tool.dataset import generate_dataset
 
 
 def parse_args():

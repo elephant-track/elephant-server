@@ -28,7 +28,6 @@ import collections
 import gc
 import os
 from pathlib import Path
-import shutil
 import tempfile
 import traceback
 import weakref
@@ -74,7 +73,7 @@ from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
-from elephant.tool import generate_dataset
+from elephant.tool import dataset as dstool
 from elephant.util import normalize_zero_one
 from elephant.util import get_device
 from elephant.util.ellipse import ellipse
@@ -809,21 +808,37 @@ def get_gpus():
     return resp
 
 
-@app.route('/dataset', methods=['POST'])
+@app.route('/dataset/check', methods=['POST'])
+def check_datset():
+    if request.headers['Content-Type'] != 'application/json':
+        return jsonify(res='error'), 400
+    req_json = request.get_json()
+    if 'dataset' not in req_json:
+        return jsonify(res='dataset key is missing'), 400
+    if dstool.check_dataset(Path(DATASETS_DIR) / req_json['dataset']):
+        return '', 200
+    else:
+        return 'dataset is not found or broken', 204
+
+
+@app.route('/dataset/generate', methods=['POST'])
 def gen_datset():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(res='error'), 400
     req_json = request.get_json()
-    if not {'input', 'output'} <= req_json.keys():
+    if 'dataset' not in req_json:
+        return jsonify(res='dataset key is missing'), 400
+    p_dataset = Path(DATASETS_DIR) / req_json['dataset']
+    h5_files = list(sorted(p_dataset.glob('*.h5')))
+    if len(h5_files) == 0:
         return jsonify(
-            res='json should include the keys input and output'), 400
-    if not Path(req_json['input']).is_file():
-        return jsonify(
-            res=f'{req_json["input"]} does not exists'), 404
+            res=f'.h5 file not found in {req_json["dataset"]}'), 400
+    elif 1 < len(h5_files):
+        print(f'multiple .h5 files found, use the first one {h5_files[0]}')
     try:
-        generate_dataset(
-            req_json['input'],
-            req_json['output'],
+        dstool.generate_dataset(
+            h5_files[0],
+            p_dataset,
             req_json.get('is_uint16', False),
             req_json.get('divisor', 1.),
             req_json.get('is_2d', False),
@@ -871,13 +886,13 @@ def upload():
             request.environ, stream_factory=custom_stream_factory)
 
         if 'dataset' not in form:
-            return jsonify(res='dataset is not specified'), 404
+            return jsonify(res='dataset is not specified'), 400
         if 'filename' not in form:
-            return jsonify(res='filename is not specified'), 404
+            return jsonify(res='filename is not specified'), 400
         if 'action' not in form:
-            return jsonify(res='action is not specified'), 404
+            return jsonify(res='action is not specified'), 400
         if form['action'] not in ('init', 'append', 'complete', 'cancel'):
-            return jsonify(res=f'unknown action: {form["action"]}'), 404
+            return jsonify(res=f'unknown action: {form["action"]}'), 400
         p_file = Path(DATASETS_DIR) / form['dataset'] / form['filename']
         p_file_tmp = p_file.with_suffix('.tmp')
         if form['action'] == 'complete':

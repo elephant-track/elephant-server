@@ -24,8 +24,9 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
-import re
 from pathlib import Path
+import re
+import traceback
 
 import h5py
 import numpy as np
@@ -40,7 +41,7 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False):
     ----------
     input : str
         Input .h5 file.
-    output : str
+    output : str or Path
         Output directory.
     is_uint16 : bool
         With this flag, the original image will be stored with uint16.
@@ -130,3 +131,63 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False):
         img[int(timepoint[1:])] = (
             np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
         ).astype(dtype)
+
+
+def check_dataset(dataset):
+    """Check a dataset for ELEPHANT.
+
+    Parameters
+    ----------
+    dataset : str or Path
+        Dataset dir to check.
+
+    Returns
+    ----------
+    `True` if everything is ok, `False` otherwise.
+
+    This function checks if the dataset has the foolowing files.
+    It also checks if zarr shapes and dtypes are consistent with imgs.zarr.
+
+    dataset
+    ├── flow_hashes.zarr
+    ├── flow_labels.zarr
+    ├── flow_outputs.zarr
+    ├── imgs.zarr
+    ├── seg_labels_vis.zarr
+    ├── seg_labels.zarr
+    └── seg_outputs.zarr
+    """
+    p = Path(dataset)
+    try:
+        img = zarr.open(str(p / 'imgs.zarr'))
+        img_shape = img.shape
+        n_dims = len(img_shape) - 1
+        n_timepoints = img_shape[0]
+        _check_zarr(p / 'flow_outputs.zarr',
+                    (n_timepoints - 1, n_dims,) + img_shape[-n_dims:],
+                    'float16')
+        _check_zarr(p / 'flow_hashes.zarr',
+                    (n_timepoints - 1,),
+                    'S16')
+        _check_zarr(p / 'flow_labels.zarr',
+                    (n_timepoints - 1, n_dims + 1,) + img_shape[-n_dims:],
+                    'float32')
+        _check_zarr(p / 'seg_outputs.zarr',
+                    (n_timepoints,) + img_shape[-n_dims:] + (3,),
+                    'float16')
+        _check_zarr(p / 'seg_labels.zarr',
+                    (n_timepoints,) + img_shape[-n_dims:],
+                    'uint8')
+        _check_zarr(p / 'seg_labels_vis.zarr',
+                    (n_timepoints,) + img_shape[-n_dims:] + (3,),
+                    'uint8')
+    except Exception as e:
+        print(traceback.format_exc())
+        return False
+    return True
+
+
+def _check_zarr(zarr_path, shape, dtype):
+    za = zarr.open(str(zarr_path))
+    if za.shape != shape or za.dtype != dtype:
+        raise ValueError

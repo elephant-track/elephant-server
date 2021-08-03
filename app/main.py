@@ -862,51 +862,33 @@ def upload():
         ----WebKitFormBoundary7MA4YWxkTrZu0gW
 
     """
-    print('new request')
-    USE_CUSTOM_STREAM = True
-    if USE_CUSTOM_STREAM:
-        tmpfile, tmpfile_path = tempfile.mkstemp(prefix='elephant')
-        with os.fdopen(tmpfile, 'w+b') as f:
-            def custom_stream_factory(total_content_length, filename,
-                                      content_type, content_length=None):
-                print(
-                    "start receiving file ... filename => " + tmpfile_path)
-                return f
+    tmpfile, tmpfile_path = tempfile.mkstemp(prefix='elephant')
+    with os.fdopen(tmpfile, 'w+b') as f:
+        def custom_stream_factory(total_content_length, filename,
+                                  content_type, content_length=None):
+            return f
+        _, form, _ = werkzeug.formparser.parse_form_data(
+            request.environ, stream_factory=custom_stream_factory)
 
-            _, form, files = werkzeug.formparser.parse_form_data(
-                request.environ, stream_factory=custom_stream_factory)
-        total_size = 0
-        num_files = 0
-
-        for fil in files.values():
-            total_size += os.path.getsize(tmpfile_path)
-            num_files += 1
-            p_file = Path(DATASETS_DIR) / form['dataset'] / fil.filename
-            if p_file.exists():
-                p_file.unlink()
-            shutil.move(tmpfile_path, str(p_file))
-            print(" ".join(
-                ["saved form name", fil.name, "submitted as",
-                    fil.filename, "to temporary file", str(p_file)])
-            )
-    else:
-        if 'file' not in request.files:
-            print('No file part')
-            return jsonify(res='No file part'), 400
-        file = request.files['file']
-        if file.filename == '':
-            print('No selected file')
-            return jsonify(res='No selected file'), 400
-        if not file.filename.endswith('.h5'):
-            print('Filename should ends with .h5')
-            return jsonify(res='Filename should ends with .h5'), 400
-        if 'dataset' not in request.form:
-            print('No dataset part')
-            return jsonify(res='No dataset part'), 400
-        p_file = Path(DATASETS_DIR) / request.form['dataset'] / file.filename
-        if p_file.exists():
-            p_file.unlink()
-        file.save(p_file)
+        if 'dataset' not in form:
+            return jsonify(res='dataset is not specified'), 404
+        if 'filename' not in form:
+            return jsonify(res='filename is not specified'), 404
+        if 'action' not in form:
+            return jsonify(res='action is not specified'), 404
+        if form['action'] not in ('init', 'append', 'complete', 'cancel'):
+            return jsonify(res=f'unknown action: {form["action"]}'), 404
+        p_file = Path(DATASETS_DIR) / form['dataset'] / form['filename']
+        p_file_tmp = p_file.with_suffix('.tmp')
+        if form['action'] == 'complete':
+            p_file_tmp.rename(p_file)
+        elif form['action'] in ('init', 'cancel') and p_file_tmp.exists():
+            p_file_tmp.unlink()
+        if form['action'] in ('init', 'append'):
+            f.seek(0)
+            with p_file_tmp.open('ab') as dest_file:
+                dest_file.write(f.read())
+            Path(tmpfile_path).unlink()
     return make_response('', 200)
 
 

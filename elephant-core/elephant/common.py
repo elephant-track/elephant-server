@@ -73,7 +73,7 @@ class TensorBoard(object):
 
 
 def train(model, device, loader, optimizer, loss_fn, epoch,
-          log_interval=100, tb_logger=None, redis_client=None):
+          log_interval=100, tb_logger=None, redis_client=None, step_offset=0):
     model.train()
     model.to(device)
     for batch_id, (x, y) in enumerate(loader):
@@ -134,7 +134,7 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
 
             # log to tensorboard
             if tb_logger is not None:
-                step = epoch * len(loader) + batch_id
+                step = step_offset + epoch * len(loader) + batch_id
                 tb_logger.log_scalar(
                     tag='train_loss',
                     value=loss.item(),

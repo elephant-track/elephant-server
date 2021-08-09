@@ -42,6 +42,8 @@ from flask_redis import FlaskRedis
 import numpy as np
 import nvsmi
 import pika
+from tensorflow.data import TFRecordDataset
+from tensorflow.core.util import event_pb2
 import torch
 import torch.utils.data as du
 import werkzeug
@@ -309,6 +311,14 @@ def train_flow():
             loss = FlowLoss(is_3d=config.is_3d).to(config.device)
             optimizers = [torch.optim.Adam(
                 model.parameters(), lr=config.lr) for model in models]
+            step_offset = 0
+            for path in sorted(Path(config.log_dir).glob('event*')):
+                try:
+                    *_, last_record = TFRecordDataset(str(path))
+                    last = event_pb2.Event.FromString(last_record.numpy()).step
+                    step_offset = max(step_offset, last+1)
+                except Exception:
+                    pass
             logger = TensorBoard(config.log_dir)
             train_loader = du.DataLoader(
                 train_dataset, shuffle=True, batch_size=1)
@@ -327,7 +337,8 @@ def train_flow():
                           epoch=epoch,
                           log_interval=100,
                           tb_logger=logger,
-                          redis_client=redis_client)
+                          redis_client=redis_client,
+                          step_offset=step_offset)
                     if (int(redis_client.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
                         print('training aborted')
@@ -650,6 +661,14 @@ def train_seg():
             redis_client.delete(REDIS_KEY_TIMEPOINT)
         if 0 < len(train_dataset):
             weight_tensor = torch.tensor(config.class_weights).float()
+            step_offset = 0
+            for path in sorted(Path(config.log_dir).glob('event*')):
+                try:
+                    *_, last_record = TFRecordDataset(str(path))
+                    last = event_pb2.Event.FromString(last_record.numpy()).step
+                    step_offset = max(step_offset, last+1)
+                except Exception:
+                    pass
             logger = TensorBoard(config.log_dir)
             loss = SegmentationLoss(class_weights=weight_tensor,
                                     false_weight=config.false_weight,
@@ -671,7 +690,8 @@ def train_seg():
                           epoch=epoch,
                           log_interval=100,
                           tb_logger=logger,
-                          redis_client=redis_client)
+                          redis_client=redis_client,
+                          step_offset=step_offset)
                     if (int(redis_client.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
                         print('training aborted')

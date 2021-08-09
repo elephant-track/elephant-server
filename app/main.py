@@ -811,37 +811,41 @@ def get_gpus():
 @app.route('/dataset/check', methods=['POST'])
 def check_datset():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
-    if 'dataset' not in req_json:
-        return jsonify(res='dataset key is missing'), 400
-    if dstool.check_dataset(Path(DATASETS_DIR) / req_json['dataset']):
-        return '', 200
-    else:
-        return 'dataset is not found or broken', 204
+    if 'dataset_name' not in req_json:
+        return jsonify(error='dataset_name key is missing'), 400
+    if 'shape' not in req_json:
+        return jsonify(error='shape key is missing'), 400
+    message = dstool.check_dataset(
+        Path(DATASETS_DIR) / req_json['dataset_name'],
+        tuple(req_json['shape'])
+    )
+    return jsonify(message=message), 200
 
 
 @app.route('/dataset/generate', methods=['POST'])
 def gen_datset():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
-    if 'dataset' not in req_json:
-        return jsonify(res='dataset key is missing'), 400
-    p_dataset = Path(DATASETS_DIR) / req_json['dataset']
+    if 'dataset_name' not in req_json:
+        return jsonify(error='dataset_name key is missing'), 400
+    p_dataset = Path(DATASETS_DIR) / req_json['dataset_name']
     h5_files = list(sorted(p_dataset.glob('*.h5')))
     if len(h5_files) == 0:
         return jsonify(
-            res=f'.h5 file not found in {req_json["dataset"]}'), 400
+            message=f'.h5 file not found in {req_json["dataset_name"]}'), 204
     elif 1 < len(h5_files):
         print(f'multiple .h5 files found, use the first one {h5_files[0]}')
     try:
         dstool.generate_dataset(
             h5_files[0],
             p_dataset,
-            req_json.get('is_uint16', False),
+            req_json.get('is_uint16', None),
             req_json.get('divisor', 1.),
             req_json.get('is_2d', False),
+            get_mq_connection(),
         )
     except Exception as e:
         print(traceback.format_exc())
@@ -885,15 +889,15 @@ def upload():
         _, form, _ = werkzeug.formparser.parse_form_data(
             request.environ, stream_factory=custom_stream_factory)
 
-        if 'dataset' not in form:
-            return jsonify(res='dataset is not specified'), 400
+        if 'dataset_name' not in form:
+            return jsonify(res='dataset_name is not specified'), 400
         if 'filename' not in form:
             return jsonify(res='filename is not specified'), 400
         if 'action' not in form:
             return jsonify(res='action is not specified'), 400
         if form['action'] not in ('init', 'append', 'complete', 'cancel'):
             return jsonify(res=f'unknown action: {form["action"]}'), 400
-        p_file = Path(DATASETS_DIR) / form['dataset'] / form['filename']
+        p_file = Path(DATASETS_DIR) / form['dataset_name'] / form['filename']
         p_file_tmp = p_file.with_suffix('.tmp')
         if form['action'] == 'complete':
             p_file_tmp.rename(p_file)

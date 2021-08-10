@@ -44,6 +44,7 @@ import nvsmi
 import pika
 from tensorflow.data import TFRecordDataset
 from tensorflow.core.util import event_pb2
+import time
 import torch
 import torch.utils.data as du
 import werkzeug
@@ -65,6 +66,7 @@ from elephant.config import SegmentationEvalConfig
 from elephant.config import SegmentationTrainConfig
 from elephant.datasets import FlowDatasetZarr
 from elephant.datasets import SegmentationDatasetZarr
+from elephant.logging import logger
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
 from elephant.models import load_flow_models
@@ -112,10 +114,23 @@ def get_mq_connection():
         g.connection = pika.BlockingConnection(
             pika.ConnectionParameters(host='localhost', heartbeat=0))
         g.connection.channel().queue_declare(queue='update')
+        g.connection.channel().queue_declare(queue='dataset')
+        g.connection.channel().queue_declare(queue='log')
         g.connection.channel().queue_declare(queue='prediction')
     if g.connection.is_closed:
         g.connection.open()
     return g.connection
+
+
+for _ in range(10):
+    try:
+        with app.app_context():
+            logger().handlers[0].connection_provider = get_mq_connection
+            print('set up MQ connection')
+        break
+    except Exception:
+        print('waiting for RabbitMQ...')
+    time.sleep(2)
 
 
 @app.teardown_appcontext
@@ -135,12 +150,12 @@ def device():
 def state():
     if request.method == 'POST':
         if request.headers['Content-Type'] != 'application/json':
-            return jsonify(res='error'), 400
+            return jsonify(error='Content-Type should be application/json'), 400
         req_json = request.get_json()
         state = req_json.get(REDIS_KEY_STATE)
         if (not isinstance(state, int) or
                 state not in TrainState._value2member_map_):
-            return jsonify(res='error'), 400
+            return jsonify(res=f'Invalid state: {state}'), 400
         redis_client.set(REDIS_KEY_STATE, state)
     return jsonify(success=True, state=int(redis_client.get(REDIS_KEY_STATE)))
 
@@ -149,17 +164,17 @@ def state():
 def params():
     if request.method == 'POST':
         if request.headers['Content-Type'] != 'application/json':
-            return jsonify(res='error'), 400
+            return jsonify(error='Content-Type should be application/json'), 400
         req_json = request.get_json()
         lr = req_json.get('lr')
         if not isinstance(lr, float) or lr < 0:
-            return jsonify(res='error'), 400
+            return jsonify(res=f'Invalid learning rate: {lr}'), 400
         n_crops = req_json.get('n_crops')
         if not isinstance(n_crops, int) or n_crops < 0:
-            return jsonify(res='error'), 400
+            return jsonify(res=f'Invalid number of crops: {n_crops}'), 400
         redis_client.set(REDIS_KEY_LR, str(lr))
         redis_client.set(REDIS_KEY_NCROPS, str(n_crops))
-        print(f'[params updated] lr: {lr}, n_crops: {n_crops}')
+        logger().info(f'[params updated] lr: {lr}, n_crops: {n_crops}')
     return jsonify(success=True,
                    lr=float(redis_client.get(REDIS_KEY_LR)),
                    n_crops=int(redis_client.get(REDIS_KEY_NCROPS)))
@@ -176,7 +191,7 @@ def _update_flow_labels(spots_dict,
         label = np.zeros(za_label.shape[1:], dtype='float32')
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
-                print('aborted')
+                logger().info('aborted')
                 return jsonify({'completed': False})
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
@@ -199,7 +214,7 @@ def _update_flow_labels(spots_dict,
                 label[i][indices] = (
                     displacement[i] / scales[-1 - i] / flow_norm_factor[i])
             label[-1][indices] = weight  # last channels is for weight
-        print('frame:{}, {} linkings'.format(t + 1, len(spots)))
+        logger().info(f'frame:{t+1}, {len(spots)} linkings')
         za_label[t] = label
     return jsonify({'completed': True})
 
@@ -207,11 +222,11 @@ def _update_flow_labels(spots_dict,
 @app.route('/update/flow', methods=['POST'])
 def update_flow_labels():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = FlowTrainConfig(req_json)
-    print(config)
+    logger().info(config)
     if req_json.get('reset'):
         state = int(redis_client.get(REDIS_KEY_STATE))
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
@@ -220,10 +235,10 @@ def update_flow_labels():
                            config.zpath_flow_label,
                            mode='w')
         except RuntimeError as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in opening zarr')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in opening zarr')
             return jsonify(error=f'Exception: {e}'), 500
         finally:
             redis_client.set(REDIS_KEY_STATE, state)
@@ -242,10 +257,10 @@ def update_flow_labels():
                                        config.zpath_flow_label,
                                        config.flow_norm_factor)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in _update_flow_labels')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in _update_flow_labels')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         redis_client.set(REDIS_KEY_STATE, state)
@@ -255,13 +270,13 @@ def update_flow_labels():
 @app.route('/train/flow', methods=['POST'])
 def train_flow():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
         return jsonify(error='Training process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = FlowTrainConfig(req_json)
-    print(config)
+    logger().info(config)
     spots_dict = collections.defaultdict(list)
     for spot in req_json.get('spots'):
         spots_dict[spot['t']].append(spot)
@@ -273,16 +288,16 @@ def train_flow():
                                   config.device,
                                   is_3d=config.is_3d)
     except FileNotFoundError:
-        print('Model file not found. Start initialization...')
+        logger().info('Model file not found. Start initialization...')
         reset_config = ResetConfig(req_json)
-        print(reset_config)
+        logger().info(reset_config)
         try:
             init_flow_models(reset_config)
         except RuntimeError as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in init_flow_models')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in init_flow_models')
             return jsonify(error=f'Exception: {e}'), 500
         models = load_flow_models(config.model_path,
                                   config.keep_axials,
@@ -319,7 +334,7 @@ def train_flow():
                     step_offset = max(step_offset, last+1)
                 except Exception:
                     pass
-            logger = TensorBoard(config.log_dir)
+            tb_logger = TensorBoard(config.log_dir)
             train_loader = du.DataLoader(
                 train_dataset, shuffle=True, batch_size=1)
 
@@ -336,21 +351,21 @@ def train_flow():
                           loss_fn=loss,
                           epoch=epoch,
                           log_interval=100,
-                          tb_logger=logger,
+                          tb_logger=tb_logger,
                           redis_client=redis_client,
                           step_offset=step_offset)
                     if (int(redis_client.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
-                        print('training aborted')
+                        logger().info('training aborted')
                         return jsonify({'completed': False})
                 torch.save(models[0].state_dict() if len(models) == 1 else
                            [model.state_dict() for model in models],
                            config.model_path)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in train_flow')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in train_flow')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         del models
@@ -363,11 +378,11 @@ def train_flow():
 @app.route('/predict/flow', methods=['POST'])
 def predict_flow():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = FlowEvalConfig(req_json)
-    print(config)
+    logger().info(config)
     res_spots = []
     if 0 < config.timepoint:
         state = int(redis_client.get(REDIS_KEY_STATE))
@@ -376,10 +391,10 @@ def predict_flow():
             spots = req_json.get('spots')
             res_spots = spots_with_flow(config, spots)
         except RuntimeError as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in spots_with_flow')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in spots_with_flow')
             return jsonify(error=f'Exception: {e}'), 500
         finally:
             gc.collect()
@@ -391,18 +406,18 @@ def predict_flow():
 @app.route('/reset/flow', methods=['POST'])
 def reset_flow_models():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = ResetConfig(req_json)
-    print(config)
+    logger().info(config)
     try:
         init_flow_models(config)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Exception: {e}'), 500
     return jsonify({'completed': True})
 
@@ -467,7 +482,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
-                print('aborted')
+                logger().info('aborted')
                 return jsonify({'completed': False})
             cnt[spot['tag']] += 1
             centroid = np.array(spot['pos'][::-1])
@@ -524,7 +539,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     1 + label_offset,
                     label[indices_outer]
                 )
-        print('frame:{}, {}'.format(
+        logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
         za_label[t] = label
         za_label_vis[t, ..., 0] = np.where(
@@ -542,11 +557,11 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
 @app.route('/update/seg', methods=['POST'])
 def update_seg_labels():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = SegmentationTrainConfig(req_json)
-    print(config)
+    logger().info(config)
     if req_json.get('reset'):
         state = int(redis_client.get(REDIS_KEY_STATE))
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
@@ -558,10 +573,10 @@ def update_seg_labels():
                            config.zpath_seg_label_vis,
                            mode='w')
         except RuntimeError as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in opening zarr')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in opening zarr')
             return jsonify(error=f'Exception: {e}'), 500
         finally:
             redis_client.set(REDIS_KEY_STATE, state)
@@ -583,10 +598,10 @@ def update_seg_labels():
                                       config.auto_bg_thresh,
                                       config.c_ratio)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in _update_seg_labels')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in _update_seg_labels')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         redis_client.set(REDIS_KEY_STATE, state)
@@ -596,13 +611,13 @@ def update_seg_labels():
 @app.route('/train/seg', methods=['POST'])
 def train_seg():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
         return jsonify(error='Training process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = SegmentationTrainConfig(req_json)
-    print(config)
+    logger().info(config)
     spots_dict = collections.defaultdict(list)
     for spot in req_json.get('spots'):
         spots_dict[spot['t']].append(spot)
@@ -615,17 +630,17 @@ def train_seg():
                                  config.device,
                                  is_3d=config.is_3d)
     except FileNotFoundError:
-        print('Model file not found. Start initialization...')
+        logger().info('Model file not found. Start initialization...')
         reset_config = ResetConfig(req_json)
-        print(config)
+        logger().info(config)
         redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
         try:
             init_seg_models(reset_config)
         except RuntimeError as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in init_seg_models')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            print(traceback.format_exc())
+            logger().exception('Failed in init_seg_models')
             return jsonify(error=f'Exception: {e}'), 500
         finally:
             gc.collect()
@@ -669,7 +684,7 @@ def train_seg():
                     step_offset = max(step_offset, last+1)
                 except Exception:
                     pass
-            logger = TensorBoard(config.log_dir)
+            tb_logger = TensorBoard(config.log_dir)
             loss = SegmentationLoss(class_weights=weight_tensor,
                                     false_weight=config.false_weight,
                                     is_3d=config.is_3d)
@@ -689,12 +704,12 @@ def train_seg():
                           loss_fn=loss,
                           epoch=epoch,
                           log_interval=100,
-                          tb_logger=logger,
+                          tb_logger=tb_logger,
                           redis_client=redis_client,
                           step_offset=step_offset)
                     if (int(redis_client.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
-                        print('training aborted')
+                        logger().info('training aborted')
                         return jsonify({'completed': False})
                 torch.save(models[0].state_dict() if len(models) == 1 else
                            [model.state_dict() for model in models],
@@ -707,10 +722,10 @@ def train_seg():
                         body='Model updated'
                     )
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in train_seg')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in train_seg')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         del models
@@ -723,11 +738,11 @@ def train_seg():
 @app.route('/predict/seg', methods=['POST'])
 def predict_seg():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = SegmentationEvalConfig(req_json)
-    print(config)
+    logger().info(config)
     state = int(redis_client.get(REDIS_KEY_STATE))
     redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
     try:
@@ -738,10 +753,10 @@ def predict_seg():
             body='Prediction updated'
         )
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in detect_spots')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in detect_spots')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         gc.collect()
@@ -753,21 +768,21 @@ def predict_seg():
 @app.route('/reset/seg', methods=['POST'])
 def reset_seg_models():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
         return jsonify(error='Training process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = ResetConfig(req_json)
-    print(config)
+    logger().info(config)
     redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
     try:
         init_seg_models(config)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         gc.collect()
@@ -780,13 +795,13 @@ def reset_seg_models():
 @app.route('/export/ctc', methods=['POST'])
 def export_ctc():
     if request.headers['Content-Type'] != 'application/json':
-        return jsonify(res='error'), 400
+        return jsonify(error='Content-Type should be application/json'), 400
     req_json = request.get_json()
     req_json['device'] = device()
     config = ExportConfig(req_json)
     za_input = zarr.open(config.zpath_input, mode='r')
     config.shape = za_input.shape[1:]
-    print(config)
+    logger().info(config)
     spots_dict = collections.defaultdict(list)
     for spot in req_json.get('spots'):
         spots_dict[spot['t']].append(spot)
@@ -804,10 +819,10 @@ def export_ctc():
         else:
             resp = make_response('', 200)
     except RuntimeError as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in export_ctc_labels')
         return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in export_ctc_labels')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
         redis_client.set(REDIS_KEY_STATE, state)
@@ -857,7 +872,8 @@ def gen_datset():
         return jsonify(
             message=f'.h5 file not found in {req_json["dataset_name"]}'), 204
     elif 1 < len(h5_files):
-        print(f'multiple .h5 files found, use the first one {h5_files[0]}')
+        logger().info(
+            f'multiple .h5 files found, use the first one {h5_files[0]}')
     try:
         dstool.generate_dataset(
             h5_files[0],
@@ -868,7 +884,7 @@ def gen_datset():
             get_mq_connection(),
         )
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in generate_dataset')
         return jsonify(error=f'Exception: {e}'), 500
     return make_response('', 200)
 

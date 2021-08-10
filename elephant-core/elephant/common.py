@@ -48,6 +48,7 @@ if os.environ.get('CTC') != '1':
     import zarr
 
 from elephant.datasets import AutoencoderDatasetZarr
+from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
@@ -84,7 +85,7 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
         if redis_client is not None:
             while (int(redis_client.get(REDIS_KEY_STATE)) ==
                    TrainState.WAIT.value):
-                print("waiting")
+                logger().info("waiting")
                 time.sleep(1)
             if (int(redis_client.get(REDIS_KEY_STATE)) ==
                     TrainState.IDLE.value):
@@ -130,7 +131,7 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
                     msg += f'\tSmooth Loss: {loss_fn.smooth_loss:.6f}'
                 except AttributeError:
                     pass
-                print(msg)
+                logger().info(msg)
 
             # log to tensorboard
             if tb_logger is not None:
@@ -205,7 +206,7 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None):
             loss
         )
     )
-    print(msg)
+    logger().info(msg)
 
     # log to tensorboard
     if tb_logger is not None:
@@ -393,7 +394,7 @@ def detect_spots(config):
                                              config.crop_box,
                                              config.is_pad)
     except Exception:
-        print(traceback.format_exc())
+        logger().exception('Failed in detect_spots')
     finally:
         torch.cuda.empty_cache()
 
@@ -617,7 +618,8 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
         if ((eigvals < 0).any() or
             np.iscomplex(eigvals).any() or
                 np.iscomplex(eigvecs).any()):
-            print(f'skip a spot with invalid eigen value(s): {eigvals}')
+            logger().debug(
+                f'skip a spot with invalid eigen value(s): {eigvals}')
             continue
         # https://stackoverflow.com/questions/22146383/covariance-matrix-of-an-ellipse
         # https://github.com/scikit-image/scikit-image/blob/master/skimage/measure/_regionprops.py#L288
@@ -656,7 +658,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     for t, spots in spots_dict.items():
         if (redis_c is not None and
                 int(redis_c.get(REDIS_KEY_STATE)) == TrainState.IDLE.value):
-            print('aborted')
+            logger().info('aborted')
             if is_zip:
                 shutil.rmtree(savedir)
             return False

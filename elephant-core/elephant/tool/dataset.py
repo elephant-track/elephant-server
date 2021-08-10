@@ -34,6 +34,8 @@ import numpy as np
 import zarr
 from tqdm import tqdm
 
+from elephant.logging import logger
+
 
 def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
                      connection=None):
@@ -71,9 +73,9 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     ├── seg_labels.zarr
     └── seg_outputs.zarr
     """
-    print(f'input: {input}')
-    print(f'output dir: {output}')
-    print(f'divisor: {divisor}')
+    logger().info(f'input: {input}')
+    logger().info(f'output dir: {output}')
+    logger().info(f'divisor: {divisor}')
     f = h5py.File(input, 'r')
     # timepoints are stored as 't00000', 't000001', ...
     timepoints = list(filter(re.compile(r't\d{5}').search, list(f.keys())))
@@ -215,7 +217,7 @@ def check_dataset(dataset, shape):
                     (n_timepoints,) + shape[-n_dims:] + (3,),
                     'uint8')
     except Exception as e:
-        print(traceback.format_exc())
+        logger().exception('Failed in check_dataset')
         message = str(e)
     return message
 

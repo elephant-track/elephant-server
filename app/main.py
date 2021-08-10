@@ -877,7 +877,6 @@ def gen_datset():
 def upload():
     """ Upload an image data to the dataset directory. # noqa: E501
 
-    USE_CISTOM_STREAM is a memory-friendly (and faster) option.
     See details:
         https://github.com/pallets/flask/issues/2086
     Code from:

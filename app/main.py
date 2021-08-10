@@ -918,6 +918,7 @@ def upload():
         if form['action'] not in ('init', 'append', 'complete', 'cancel'):
             return jsonify(res=f'unknown action: {form["action"]}'), 400
         p_file = Path(DATASETS_DIR) / form['dataset_name'] / form['filename']
+        p_file.parent.mkdir(parents=True, exist_ok=True)
         p_file_tmp = p_file.with_suffix('.tmp')
         if form['action'] == 'complete':
             p_file_tmp.rename(p_file)

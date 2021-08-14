@@ -306,36 +306,3 @@ class FlowResNet(UNet):
             for param in model.encoder.parameters():
                 param.requires_grad = False
         return model
-
-
-def load_seg_models(model_path, keep_axials, device, is_eval=False,
-                    is_decoder_only=False, is_pad=False, is_3d=True):
-    checkpoint = torch.load(model_path, map_location=device)
-    state_dicts = checkpoint if isinstance(checkpoint, list) else [checkpoint]
-    # print(len(state_dicts), 'models will be ensembled')
-    models = [UNet.three_class_segmentation(
-        keep_axials,
-        is_eval=is_eval,
-        device=device,
-        state_dict=state_dict,
-        is_decoder_only=is_decoder_only,
-        is_pad=is_pad,
-        is_3d=is_3d,
-    ) for state_dict in state_dicts]
-    return models
-
-
-def load_flow_models(model_path, keep_axials, device, is_eval=False,
-                     is_decoder_only=False, is_pad=False, is_3d=True):
-    checkpoint = torch.load(model_path, map_location=device)
-    state_dicts = checkpoint if isinstance(checkpoint, list) else [checkpoint]
-    # print(len(state_dicts), 'models will be ensembled')
-    return [FlowResNet.three_dimensional_flow(
-        keep_axials=keep_axials,
-        is_eval=is_eval,
-        device=device,
-        state_dict=state_dict,
-        is_decoder_only=is_decoder_only,
-        is_pad=is_pad,
-        is_3d=is_3d,
-    ) for state_dict in state_dicts]

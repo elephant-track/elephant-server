@@ -27,7 +27,6 @@
 """Commandline interface for training using a config file."""
 import argparse
 import io
-import gc
 import json
 
 import torch
@@ -37,8 +36,8 @@ import zarr
 
 from elephant.common import TensorBoard
 from elephant.common import evaluate
-from elephant.common import init_flow_models
-from elephant.common import init_seg_models
+from elephant.common import load_flow_models
+from elephant.common import load_seg_models
 from elephant.common import train
 from elephant.config import FlowTrainConfig
 from elephant.config import ResetConfig
@@ -47,8 +46,6 @@ from elephant.datasets import FlowDatasetZarr
 from elephant.datasets import SegmentationDatasetZarr
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
-from elephant.models import load_flow_models
-from elephant.models import load_seg_models
 
 
 def main():
@@ -228,26 +225,21 @@ def load_models(config, command):
     Returns:
         models: loaded or initialized models
     """
-    try:
-        if command == 'seg':
-            models = load_seg_models(config.model_path,
-                                     config.keep_axials,
-                                     config.device,
-                                     is_3d=config.is_3d)
-        elif command == 'flow':
-            models = load_flow_models(config.model_path,
-                                      config.keep_axials,
-                                      config.device,
-                                      is_3d=config.is_3d)
-    except Exception:
-        try:
-            if command == 'seg':
-                models = init_seg_models(config)
-            elif command == 'flow':
-                models = init_flow_models(config)
-        finally:
-            gc.collect()
-            torch.cuda.empty_cache()
+    if command == 'seg':
+        models = load_seg_models(config.model_path,
+                                 config.keep_axials,
+                                 config.device,
+                                 is_3d=config.is_3d,
+                                 n_models=config.n_models,
+                                 n_crops=config.n_crops,
+                                 zpath_input=config.zpath_input,
+                                 crop_size=config.crop_size,
+                                 scales=config.scales)
+    elif command == 'flow':
+        models = load_flow_models(config.model_path,
+                                  config.keep_axials,
+                                  config.device,
+                                  is_3d=config.is_3d)
     return models
 
 

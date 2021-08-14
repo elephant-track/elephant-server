@@ -217,7 +217,7 @@ def check_dataset(dataset, shape):
                     (n_timepoints,) + shape[-n_dims:] + (3,),
                     'uint8')
     except Exception as e:
-        logger().exception('Failed in check_dataset')
+        logger().info(str(e))
         message = str(e)
     return message
 

@@ -24,6 +24,7 @@
 # ==============================================================================
 """Implementations of operations."""
 
+import gc
 import hashlib
 from functools import reduce
 import json
@@ -34,7 +35,6 @@ from pathlib import Path
 import shutil
 import tempfile
 import time
-import traceback
 
 import numpy as np
 from skimage.filters import gaussian
@@ -52,8 +52,7 @@ from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
-from elephant.models import load_flow_models
-from elephant.models import load_seg_models
+from elephant.redis_util import REDIS_KEY_COUNT
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import TrainState
@@ -306,9 +305,8 @@ def predict(model, x, patch_size=None, is_log=True):
         return func(model(x)[0].detach().cpu().numpy())
 
 
-def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
-                        use_median=True, patch_size=None, crop_box=None,
-                        is_pad=False):
+def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
+                        patch_size=None, crop_box=None):
     img = img.astype('float32')
     n_dims = len(img.shape)
     is_3d = n_dims == 3
@@ -319,8 +317,6 @@ def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
             if 0 < slice_median:
                 img[z] -= slice_median - global_median
     img = normalize_zero_one(img)
-    models = load_seg_models(model_path, keep_axials, device, is_eval=True,
-                             is_pad=is_pad, is_3d=is_3d)
     if crop_box is not None:
         slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
                   slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
@@ -363,36 +359,40 @@ def _get_seg_prediction(img, timepoint, model_path, keep_axials, device,
     return prediction
 
 
-def detect_spots(config):
+def detect_spots(config, redis_client=None):
     if hasattr(config, 'tiff_input') and config.tiff_input is not None:
         img_input = skimage.io.imread(config.tiff_input)
     elif config.zpath_input is not None:
         za_input = zarr.open(config.zpath_input, mode='a')
         img_input = za_input[config.timepoint]
     try:
+        models = load_seg_models(config.model_path,
+                                 config.keep_axials,
+                                 config.device,
+                                 is_3d=config.is_3d,
+                                 zpath_input=config.zpath_input,
+                                 crop_size=config.crop_size,
+                                 scales=config.scales,
+                                 redis_client=redis_client)
         if len(img_input.shape) == 3 and config.use_2d:
             prediction = np.swapaxes(np.array([
                 _get_seg_prediction(img_input[z],
-                                    config.timepoint,
-                                    config.model_path,
+                                    models,
                                     config.keep_axials,
                                     config.device,
                                     config.use_median,
                                     config.patch_size[-2:],
-                                    config.crop_box,
-                                    config.is_pad)
+                                    config.crop_box)
                 for z in range(img_input.shape[0])
             ]), 0, 1)
         else:
             prediction = _get_seg_prediction(img_input,
-                                             config.timepoint,
-                                             config.model_path,
+                                             models,
                                              config.keep_axials,
                                              config.device,
                                              config.use_median,
                                              config.patch_size,
-                                             config.crop_box,
-                                             config.is_pad)
+                                             config.crop_box)
     except Exception:
         logger().exception('Failed in detect_spots')
     finally:
@@ -431,11 +431,14 @@ def detect_spots(config):
     return spots
 
 
-def _get_flow_prediction(img, timepoint, model_path, keep_axials, device,
-                         flow_norm_factor, patch_size, is_3d):
+def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
+                         is_3d):
     img = normalize_zero_one(img.astype('float32'))
-    models = load_flow_models(
-        model_path, keep_axials, device, is_eval=True, is_3d=is_3d)
+    models = load_flow_models(model_path,
+                              keep_axials,
+                              device,
+                              is_eval=True,
+                              is_3d=is_3d)
 
     if patch_size is None:
         pad_base = (2**keep_axials.count(False), 16, 16)
@@ -530,18 +533,20 @@ def spots_with_flow(config, spots):
         za_hash = zarr.open(config.zpath_flow_hashes, mode='a')
 
         # https://stackoverflow.com/questions/3431825/generating-an-md5-checksum-of-a-file#answer-3431838
-        hash_md5 = hashlib.md5()
-        with open(config.model_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
-                hash_md5.update(chunk)
-        za_md5 = zarr.array(
-            za_input[config.timepoint - 1:config.timepoint + 1]).digest('md5')
-        hash_md5.update(za_md5)
-        hash_md5.update(json.dumps(config.patch_size).encode('utf-8'))
-        model_md5 = hash_md5.digest()
-        if model_md5 == za_hash[config.timepoint - 1]:
-            prediction = za_flow[config.timepoint - 1]
-        else:
+        if Path(config.model_path).exists():
+            hash_md5 = hashlib.md5()
+            with open(config.model_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    hash_md5.update(chunk)
+            za_md5 = zarr.array(
+                za_input[config.timepoint - 1:config.timepoint + 1]
+            ).digest('md5')
+            hash_md5.update(za_md5)
+            hash_md5.update(json.dumps(config.patch_size).encode('utf-8'))
+            model_md5 = hash_md5.digest()
+            if model_md5 == za_hash[config.timepoint - 1]:
+                prediction = za_flow[config.timepoint - 1]
+        if prediction is None:
             img_input = np.array([
                 normalize_zero_one(za_input[i].astype('float32'))
                 for i in range(config.timepoint - 1, config.timepoint + 1)
@@ -549,11 +554,9 @@ def spots_with_flow(config, spots):
     if prediction is None:
         try:
             prediction = _get_flow_prediction(img_input,
-                                              config.timepoint,
                                               config.model_path,
                                               config.keep_axials,
                                               config.device,
-                                              config.flow_norm_factor,
                                               config.patch_size,
                                               config.is_3d)
         finally:
@@ -711,51 +714,136 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     return True
 
 
-def init_seg_models(config):
+def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
+                    n_crops=0, zpath_input=None, crop_size=None, scales=None,
+                    redis_client=None):
     models = [UNet.three_class_segmentation(
-        config.keep_axials,
-        device=config.device,
-        is_3d=config.is_3d,
-    ) for i in range(config.n_models)]
-    n_dims = 2 + config.is_3d  # 3 or 2
-    input_shape = zarr.open(config.zpath_input, mode='r').shape[-n_dims:]
-    n_crops = config.n_crops
-    train_dataset = AutoencoderDatasetZarr(
-        config.zpath_input,
-        input_shape,
-        config.crop_size,
-        n_crops,
-        scales=config.scales,
-        scale_factor_base=0.2,
-    )
-    loss = AutoencoderLoss()
-    loss = loss.to(config.device)
-    train_loader = du.DataLoader(
-        train_dataset, shuffle=True, batch_size=1)
-    for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
-        optimizers = [torch.optim.Adam(
-            model.parameters(), lr=lr) for model in models]
-        for model, optimizer in zip(models, optimizers):
-            train(model,
-                  config.device,
-                  train_loader,
-                  optimizer=optimizer,
-                  loss_fn=loss,
-                  epoch=i,
-                  log_interval=1)
-    Path(config.model_path).parent.mkdir(parents=True, exist_ok=True)
+        keep_axials,
+        device=device,
+        is_3d=is_3d,
+    ) for i in range(n_models)]
+    n_dims = 2 + is_3d  # 3 or 2
+    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    if 0 < n_crops:
+        errors = []
+        if zpath_input is None:
+            errors.append('zpath_input is required. Skip prior training.')
+        if crop_size is None:
+            errors.append('crop_size is required. Skip prior training.')
+        if 0 < len(errors):
+            for error in errors:
+                logger().error(error)
+        else:
+            if redis_client is not None:
+                redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
+            try:
+                train_dataset = AutoencoderDatasetZarr(
+                    zpath_input,
+                    input_shape,
+                    crop_size,
+                    n_crops,
+                    scales=scales,
+                    scale_factor_base=0.2,
+                )
+                loss = AutoencoderLoss()
+                loss = loss.to(device)
+                train_loader = du.DataLoader(
+                    train_dataset, shuffle=True, batch_size=1)
+                for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
+                    optimizers = [torch.optim.Adam(
+                        model.parameters(), lr=lr) for model in models]
+                    for model, optimizer in zip(models, optimizers):
+                        train(model,
+                              device,
+                              train_loader,
+                              optimizer=optimizer,
+                              loss_fn=loss,
+                              epoch=i,
+                              log_interval=1)
+            finally:
+                if redis_client is not None:
+                    redis_client.set(REDIS_KEY_COUNT, 0)
+                    redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     torch.save(models[0].state_dict() if len(models) == 1 else [
-        model.state_dict() for model in models], config.model_path)
+        model.state_dict() for model in models], model_path)
+
+
+def init_flow_models(model_path, keep_axials, device, is_3d=True, n_models=1):
+    models = [FlowResNet.three_dimensional_flow(
+        keep_axials,
+        device=device,
+        is_3d=is_3d,
+    ) for i in range(n_models)]
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(models[0].state_dict() if len(models) == 1 else [
+        model.state_dict() for model in models], model_path)
     return models
 
 
-def init_flow_models(config):
-    models = [FlowResNet.three_dimensional_flow(
-        config.keep_axials,
-        device=config.device,
-        is_3d=config.is_3d,
-    ) for i in range(config.n_models)]
-    Path(config.model_path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(models[0].state_dict() if len(models) == 1 else [
-        model.state_dict() for model in models], config.model_path)
+def load_seg_models(model_path, keep_axials, device, is_eval=False,
+                    is_decoder_only=False, is_pad=False, is_3d=True,
+                    n_models=1, n_crops=5, zpath_input=None, crop_size=None,
+                    scales=None, redis_client=None):
+    if not Path(model_path).exists():
+        logger().info(
+            f'Model file {model_path} not found. Start initialization...')
+        try:
+            init_seg_models(model_path,
+                            keep_axials,
+                            device,
+                            is_3d,
+                            n_models,
+                            n_crops,
+                            zpath_input,
+                            crop_size,
+                            scales,
+                            redis_client=redis_client)
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
+    checkpoint = torch.load(model_path, map_location=device)
+    state_dicts = checkpoint if isinstance(
+        checkpoint, list) else [checkpoint]
+    # print(len(state_dicts), 'models will be ensembled')
+    models = [UNet.three_class_segmentation(
+        keep_axials,
+        is_eval=is_eval,
+        device=device,
+        state_dict=state_dict,
+        is_decoder_only=is_decoder_only,
+        is_pad=is_pad,
+        is_3d=is_3d,
+    ) for state_dict in state_dicts]
+    return models
+
+
+def load_flow_models(model_path, keep_axials, device, is_eval=False,
+                     is_decoder_only=False, is_pad=False, is_3d=True,
+                     n_models=1):
+    if Path(model_path).exists():
+        checkpoint = torch.load(model_path, map_location=device)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        # print(len(state_dicts), 'models will be ensembled')
+        models = [FlowResNet.three_dimensional_flow(
+            keep_axials=keep_axials,
+            is_eval=is_eval,
+            device=device,
+            state_dict=state_dict,
+            is_decoder_only=is_decoder_only,
+            is_pad=is_pad,
+            is_3d=is_3d,
+        ) for state_dict in state_dicts]
+    else:
+        logger().info(
+            f'Model file {model_path} not found. Start initialization...')
+        models = init_flow_models(model_path,
+                                  keep_axials,
+                                  device,
+                                  is_3d,
+                                  n_models)
+        if is_eval:
+            for model in models:
+                model.eval()
     return models

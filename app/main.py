@@ -55,6 +55,8 @@ from elephant.common import detect_spots
 from elephant.common import export_ctc_labels
 from elephant.common import init_flow_models
 from elephant.common import init_seg_models
+from elephant.common import load_flow_models
+from elephant.common import load_seg_models
 from elephant.common import spots_with_flow
 from elephant.common import train
 from elephant.config import DATASETS_DIR
@@ -69,8 +71,6 @@ from elephant.datasets import SegmentationDatasetZarr
 from elephant.logging import logger
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
-from elephant.models import load_flow_models
-from elephant.models import load_seg_models
 from elephant.redis_util import REDIS_KEY_COUNT
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
@@ -287,23 +287,9 @@ def train_flow():
                                   config.keep_axials,
                                   config.device,
                                   is_3d=config.is_3d)
-    except FileNotFoundError:
-        logger().info('Model file not found. Start initialization...')
-        reset_config = ResetConfig(req_json)
-        logger().info(reset_config)
-        try:
-            init_flow_models(reset_config)
-        except RuntimeError as e:
-            logger().exception('Failed in init_flow_models')
-            return jsonify(error=f'Runtime Error: {e}'), 500
-        except Exception as e:
-            logger().exception('Failed in init_flow_models')
-            return jsonify(error=f'Exception: {e}'), 500
-        models = load_flow_models(config.model_path,
-                                  config.keep_axials,
-                                  config.device,
-                                  is_3d=config.is_3d)
-        # return jsonify(message='model file not found'), 204
+    except Exception as e:
+        logger().exception('Failed in init_flow_models')
+        return jsonify(error=f'Exception: {e}'), 500
     try:
         _update_flow_labels(spots_dict,
                             config.scales,
@@ -628,27 +614,13 @@ def train_seg():
         models = load_seg_models(config.model_path,
                                  config.keep_axials,
                                  config.device,
-                                 is_3d=config.is_3d)
-    except FileNotFoundError:
-        logger().info('Model file not found. Start initialization...')
-        reset_config = ResetConfig(req_json)
-        logger().info(config)
-        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
-        try:
-            init_seg_models(reset_config)
-        except RuntimeError as e:
-            logger().exception('Failed in init_seg_models')
-            return jsonify(error=f'Runtime Error: {e}'), 500
-        except Exception as e:
-            logger().exception('Failed in init_seg_models')
-            return jsonify(error=f'Exception: {e}'), 500
-        finally:
-            gc.collect()
-            torch.cuda.empty_cache()
-        models = load_seg_models(config.model_path,
-                                 config.keep_axials,
-                                 config.device,
-                                 is_3d=config.is_3d)
+                                 is_3d=config.is_3d,
+                                 zpath_input=config.zpath_input,
+                                 crop_size=config.crop_size,
+                                 scales=config.scales)
+    except Exception as e:
+        logger().exception('Failed in load_seg_models')
+        return jsonify(error=f'Exception: {e}'), 500
     try:
         _update_seg_labels(spots_dict,
                            config.scales,
@@ -746,7 +718,7 @@ def predict_seg():
     state = int(redis_client.get(REDIS_KEY_STATE))
     redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
     try:
-        spots = detect_spots(config)
+        spots = detect_spots(config, redis_client)
         get_mq_connection().channel().basic_publish(
             exchange='',
             routing_key='prediction',
@@ -775,9 +747,17 @@ def reset_seg_models():
     req_json['device'] = device()
     config = ResetConfig(req_json)
     logger().info(config)
-    redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
     try:
-        init_seg_models(config)
+        init_seg_models(config.model_path,
+                        config.keep_axials,
+                        config.device,
+                        config.is_3d,
+                        config.n_models,
+                        config.n_crops,
+                        config.zpath_input,
+                        config.crop_size,
+                        config.scales,
+                        redis_client=redis_client)
     except RuntimeError as e:
         logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -787,8 +767,6 @@ def reset_seg_models():
     finally:
         gc.collect()
         torch.cuda.empty_cache()
-        redis_client.set(REDIS_KEY_COUNT, 0)
-        redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
     return jsonify({'completed': True})
 
 

@@ -50,6 +50,8 @@ if os.environ.get('CTC') != '1':
 from elephant.datasets import AutoencoderDatasetZarr
 from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
+from elephant.losses import FlowLoss
+from elephant.losses import SegmentationLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
 from elephant.redis_util import REDIS_KEY_COUNT
@@ -76,6 +78,16 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
           log_interval=100, tb_logger=None, redis_client=None, step_offset=0):
     model.train()
     model.to(device)
+    count = 0
+    loss_avg = 0
+    if isinstance(loss_fn, SegmentationLoss):
+        nll_loss_avg = 0
+        center_loss_avg = 0
+        smooth_loss_avg = 0
+    elif isinstance(loss_fn, FlowLoss):
+        instance_loss_avg = 0
+        ssim_loss_avg = 0
+        smooth_loss_avg = 0
     for batch_id, (x, y) in enumerate(loader):
         # (torch.tensor(-100.), torch.tensor(-100)) is returned when aborted
         if (torch.eq(x, torch.tensor(-100.)).any() and
@@ -105,79 +117,100 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
             loss.backward()
             optimizer.step()
 
+            count += 1
+            loss_avg += loss.item()
+            if isinstance(loss_fn, SegmentationLoss):
+                nll_loss_avg += loss_fn.nll_loss.item()
+                center_loss_avg += loss_fn.center_loss.item()
+                smooth_loss_avg += loss_fn.smooth_loss.item()
+            elif isinstance(loss_fn, FlowLoss):
+                instance_loss_avg += loss_fn.instance_loss.item()
+                ssim_loss_avg += loss_fn.ssim_loss.item()
+                smooth_loss_avg += loss_fn.smooth_loss.item()
             # log to console
             if batch_id % log_interval == 0:
+                loss_avg /= count
+                if isinstance(loss_fn, SegmentationLoss):
+                    nll_loss_avg /= count
+                    center_loss_avg /= count
+                    smooth_loss_avg /= count
+                elif isinstance(loss_fn, FlowLoss):
+                    instance_loss_avg /= count
+                    ssim_loss_avg /= count
+                    smooth_loss_avg /= count
                 msg = (
                     'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch,
                         batch_id * len(x),
                         len(loader.dataset),
                         100. * batch_id / len(loader),
-                        loss.item()
+                        loss_avg
                     )
                 )
                 # SegmentatioinLoss only
-                try:
-                    msg += f'\tNLL Loss: {loss_fn.nll_loss:.6f}'
-                    msg += f'\tCenter Dice Loss: {loss_fn.center_loss:.6f}'
-                    msg += f'\tSmooth Loss: {loss_fn.smooth_loss:.6f}'
-                except AttributeError:
-                    pass
+                if isinstance(loss_fn, SegmentationLoss):
+                    msg += f'\tNLL Loss: {nll_loss_avg:.6f}'
+                    msg += f'\tCenter Dice Loss: {center_loss_avg:.6f}'
+                    msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
                 # FlowLoss only
-                try:
-                    msg += f'\tInstance Loss: {loss_fn.instance_loss:.6f}'
-                    msg += f'\tSSIM Loss: {loss_fn.ssim_loss:.6f}'
-                    msg += f'\tSmooth Loss: {loss_fn.smooth_loss:.6f}'
-                except AttributeError:
-                    pass
+                elif isinstance(loss_fn, FlowLoss):
+                    msg += f'\tInstance Loss: {instance_loss_avg:.6f}'
+                    msg += f'\tSSIM Loss: {ssim_loss_avg:.6f}'
+                    msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
                 logger().info(msg)
 
-            # log to tensorboard
-            if tb_logger is not None:
-                step = step_offset + epoch * len(loader) + batch_id
-                tb_logger.log_scalar(
-                    tag='train_loss',
-                    value=loss.item(),
-                    step=step
-                )
-                # SegmentatioinLoss only
-                try:
+                # log to tensorboard
+                if tb_logger is not None:
+                    step = step_offset + epoch * len(loader) + batch_id
                     tb_logger.log_scalar(
-                        tag='nll_loss',
-                        value=loss_fn.nll_loss,
+                        tag='train_loss',
+                        value=loss_avg,
                         step=step
                     )
-                    tb_logger.log_scalar(
-                        tag='center_dice_loss',
-                        value=loss_fn.center_loss,
-                        step=step
-                    )
-                    tb_logger.log_scalar(
-                        tag='smooth_loss',
-                        value=loss_fn.smooth_loss,
-                        step=step
-                    )
-                except AttributeError:
-                    pass
-                # FlowLoss only
-                try:
-                    tb_logger.log_scalar(
-                        tag='instance_loss',
-                        value=loss_fn.instance_loss,
-                        step=step
-                    )
-                    tb_logger.log_scalar(
-                        tag='SSIM_loss',
-                        value=loss_fn.ssim_loss,
-                        step=step
-                    )
-                    tb_logger.log_scalar(
-                        tag='smooth_loss',
-                        value=loss_fn.smooth_loss,
-                        step=step
-                    )
-                except AttributeError:
-                    pass
+                    # SegmentatioinLoss only
+                    if isinstance(loss_fn, SegmentationLoss):
+                        tb_logger.log_scalar(
+                            tag='nll_loss',
+                            value=nll_loss_avg,
+                            step=step
+                        )
+                        tb_logger.log_scalar(
+                            tag='center_dice_loss',
+                            value=center_loss_avg,
+                            step=step
+                        )
+                        tb_logger.log_scalar(
+                            tag='smooth_loss',
+                            value=smooth_loss_avg,
+                            step=step
+                        )
+                    # FlowLoss only
+                    elif isinstance(loss_fn, FlowLoss):
+                        tb_logger.log_scalar(
+                            tag='instance_loss',
+                            value=instance_loss_avg,
+                            step=step
+                        )
+                        tb_logger.log_scalar(
+                            tag='SSIM_loss',
+                            value=ssim_loss_avg,
+                            step=step
+                        )
+                        tb_logger.log_scalar(
+                            tag='smooth_loss',
+                            value=smooth_loss_avg,
+                            step=step
+                        )
+                count = 0
+                loss_avg = 0
+                if isinstance(loss_fn, SegmentationLoss):
+                    nll_loss_avg = 0
+                    center_loss_avg = 0
+                    smooth_loss_avg = 0
+                elif isinstance(loss_fn, FlowLoss):
+                    instance_loss_avg = 0
+                    ssim_loss_avg = 0
+                    smooth_loss_avg = 0
         finally:
             torch.cuda.empty_cache()
 

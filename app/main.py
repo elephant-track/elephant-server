@@ -336,7 +336,7 @@ def train_flow():
                           optimizer=optimizer,
                           loss_fn=loss,
                           epoch=epoch,
-                          log_interval=100,
+                          log_interval=config.log_interval,
                           tb_logger=tb_logger,
                           redis_client=redis_client,
                           step_offset=step_offset)
@@ -675,7 +675,7 @@ def train_seg():
                           optimizer=optimizer,
                           loss_fn=loss,
                           epoch=epoch,
-                          log_interval=100,
+                          log_interval=config.log_interval,
                           tb_logger=tb_logger,
                           redis_client=redis_client,
                           step_offset=step_offset)

@@ -576,19 +576,23 @@ def spots_with_flow(config, spots):
         za_hash = zarr.open(config.zpath_flow_hashes, mode='a')
 
         # https://stackoverflow.com/questions/3431825/generating-an-md5-checksum-of-a-file#answer-3431838
-        if Path(config.model_path).exists():
-            hash_md5 = hashlib.md5()
-            with open(config.model_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(4096), b''):
-                    hash_md5.update(chunk)
-            za_md5 = zarr.array(
-                za_input[config.timepoint - 1:config.timepoint + 1]
-            ).digest('md5')
-            hash_md5.update(za_md5)
-            hash_md5.update(json.dumps(config.patch_size).encode('utf-8'))
-            model_md5 = hash_md5.digest()
-            if model_md5 == za_hash[config.timepoint - 1]:
-                prediction = za_flow[config.timepoint - 1]
+        if not Path(config.model_path).exists():
+            init_flow_models(config.model_path,
+                             config.keep_axials,
+                             config.device,
+                             config.is_3d)
+        hash_md5 = hashlib.md5()
+        with open(config.model_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b''):
+                hash_md5.update(chunk)
+        za_md5 = zarr.array(
+            za_input[config.timepoint - 1:config.timepoint + 1]
+        ).digest('md5')
+        hash_md5.update(za_md5)
+        hash_md5.update(json.dumps(config.patch_size).encode('utf-8'))
+        model_md5 = hash_md5.digest()
+        if model_md5 == za_hash[config.timepoint - 1]:
+            prediction = za_flow[config.timepoint - 1]
         if prediction is None:
             img_input = np.array([
                 normalize_zero_one(za_input[i].astype('float32'))
@@ -821,7 +825,6 @@ def init_flow_models(model_path, keep_axials, device, is_3d=True, n_models=1):
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     torch.save(models[0].state_dict() if len(models) == 1 else [
         model.state_dict() for model in models], model_path)
-    return models
 
 
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
@@ -864,29 +867,25 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
 def load_flow_models(model_path, keep_axials, device, is_eval=False,
                      is_decoder_only=False, is_pad=False, is_3d=True,
                      n_models=1):
-    if Path(model_path).exists():
-        checkpoint = torch.load(model_path, map_location=device)
-        state_dicts = checkpoint if isinstance(
-            checkpoint, list) else [checkpoint]
-        # print(len(state_dicts), 'models will be ensembled')
-        models = [FlowResNet.three_dimensional_flow(
-            keep_axials=keep_axials,
-            is_eval=is_eval,
-            device=device,
-            state_dict=state_dict,
-            is_decoder_only=is_decoder_only,
-            is_pad=is_pad,
-            is_3d=is_3d,
-        ) for state_dict in state_dicts]
-    else:
+    if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
-        models = init_flow_models(model_path,
-                                  keep_axials,
-                                  device,
-                                  is_3d,
-                                  n_models)
-        if is_eval:
-            for model in models:
-                model.eval()
+        init_flow_models(model_path,
+                         keep_axials,
+                         device,
+                         is_3d,
+                         n_models)
+    checkpoint = torch.load(model_path, map_location=device)
+    state_dicts = checkpoint if isinstance(
+        checkpoint, list) else [checkpoint]
+    # print(len(state_dicts), 'models will be ensembled')
+    models = [FlowResNet.three_dimensional_flow(
+        keep_axials=keep_axials,
+        is_eval=is_eval,
+        device=device,
+        state_dict=state_dict,
+        is_decoder_only=is_decoder_only,
+        is_pad=is_pad,
+        is_3d=is_3d,
+    ) for state_dict in state_dicts]
     return models

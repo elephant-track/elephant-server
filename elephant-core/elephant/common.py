@@ -64,6 +64,10 @@ from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 from elephant.util.scaled_moments import scaled_moments_central
 
+MODEL_URL_ROOT = (
+    'https://github.com/elephant-track/elephant-server/releases/download/data/'
+)
+
 
 class TensorBoard(object):
     def __init__(self, log_dir):
@@ -763,57 +767,73 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                     n_crops=0, zpath_input=None, crop_size=None, scales=None,
-                    redis_client=None):
-    models = [UNet.three_class_segmentation(
-        keep_axials,
-        device=device,
-        is_3d=is_3d,
-    ) for i in range(n_models)]
-    n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
-    if 0 < n_crops:
-        errors = []
-        if zpath_input is None:
-            errors.append('zpath_input is required. Skip prior training.')
-        if crop_size is None:
-            errors.append('crop_size is required. Skip prior training.')
-        if 0 < len(errors):
-            for error in errors:
-                logger().error(error)
-        else:
-            try:
-                if redis_client is not None:
-                    redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
-                train_dataset = AutoencoderDatasetZarr(
-                    zpath_input,
-                    input_shape,
-                    crop_size,
-                    n_crops,
-                    scales=scales,
-                    scale_factor_base=0.2,
-                )
-                loss = AutoencoderLoss()
-                loss = loss.to(device)
-                train_loader = du.DataLoader(
-                    train_dataset, shuffle=True, batch_size=1)
-                for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
-                    optimizers = [torch.optim.Adam(
-                        model.parameters(), lr=lr) for model in models]
-                    for model, optimizer in zip(models, optimizers):
-                        train(model,
-                              device,
-                              train_loader,
-                              optimizer=optimizer,
-                              loss_fn=loss,
-                              epoch=i,
-                              log_interval=1)
-            finally:
-                if redis_client is not None:
-                    redis_client.set(REDIS_KEY_COUNT, 0)
-                    redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
+                    redis_client=None, is_pretrained=True):
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(models[0].state_dict() if len(models) == 1 else [
-        model.state_dict() for model in models], model_path)
+    if is_pretrained:
+        url = f'{MODEL_URL_ROOT}versatile{2+is_3d}d.pth'
+        print(url)
+        checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
+                   model_path)
+        models = [UNet.three_class_segmentation(
+            keep_axials,
+            device=device,
+            state_dict=state_dict,
+            is_3d=is_3d,
+        ) for state_dict in state_dicts]
+    else:
+        models = [UNet.three_class_segmentation(
+            keep_axials,
+            device=device,
+            is_3d=is_3d,
+        ) for i in range(n_models)]
+        n_dims = 2 + is_3d  # 3 or 2
+        input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+        if 0 < n_crops:
+            errors = []
+            if zpath_input is None:
+                errors.append('zpath_input is required. Skip prior training.')
+            if crop_size is None:
+                errors.append('crop_size is required. Skip prior training.')
+            if 0 < len(errors):
+                for error in errors:
+                    logger().error(error)
+            else:
+                try:
+                    if redis_client is not None:
+                        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
+                    train_dataset = AutoencoderDatasetZarr(
+                        zpath_input,
+                        input_shape,
+                        crop_size,
+                        n_crops,
+                        scales=scales,
+                        scale_factor_base=0.2,
+                    )
+                    loss = AutoencoderLoss()
+                    loss = loss.to(device)
+                    train_loader = du.DataLoader(
+                        train_dataset, shuffle=True, batch_size=1)
+                    for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
+                        optimizers = [torch.optim.Adam(
+                            model.parameters(), lr=lr) for model in models]
+                        for model, optimizer in zip(models, optimizers):
+                            train(model,
+                                  device,
+                                  train_loader,
+                                  optimizer=optimizer,
+                                  loss_fn=loss,
+                                  epoch=i,
+                                  log_interval=1)
+                finally:
+                    if redis_client is not None:
+                        redis_client.set(REDIS_KEY_COUNT, 0)
+                        redis_client.set(
+                            REDIS_KEY_STATE, TrainState.IDLE.value)
+        torch.save(models[0].state_dict() if len(models) == 1 else [
+            model.state_dict() for model in models], model_path)
 
 
 def init_flow_models(model_path, keep_axials, device, is_3d=True, n_models=1):

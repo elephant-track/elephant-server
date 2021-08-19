@@ -29,7 +29,6 @@ import gc
 import os
 from pathlib import Path
 import tempfile
-import traceback
 import weakref
 
 from flask import Flask

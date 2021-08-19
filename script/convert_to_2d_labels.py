@@ -51,7 +51,7 @@ def main():
         for i in range(2):
             p_seg = p / f'0{i+1}_{ref_type}' / 'SEG'
             if p_seg.exists():
-                p_seg_org = p_seg.parent / 'SEG_org'
+                p_seg_org = p_seg.parent / 'SEG_3d'
                 p_seg.rename(p_seg_org)
                 p_seg.mkdir(exist_ok=True)
                 for f in tqdm(p_seg_org.glob('*.tif')):

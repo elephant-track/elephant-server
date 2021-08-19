@@ -222,47 +222,46 @@ def _update_flow_labels(spots_dict,
 def update_flow_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
-    req_json = request.get_json()
-    req_json['device'] = device()
-    config = FlowTrainConfig(req_json)
-    logger().info(config)
-    if req_json.get('reset'):
-        state = int(redis_client.get(REDIS_KEY_STATE))
-        redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+    state = int(redis_client.get(REDIS_KEY_STATE))
+    try:
+        req_json = request.get_json()
+        req_json['device'] = device()
+        config = FlowTrainConfig(req_json)
+        logger().info(config)
+        if req_json.get('reset'):
+            try:
+                redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+                zarr.open_like(zarr.open(config.zpath_flow_label, mode='r'),
+                               config.zpath_flow_label,
+                               mode='w')
+            except RuntimeError as e:
+                logger().exception('Failed in opening zarr')
+                return jsonify(error=f'Runtime Error: {e}'), 500
+            except Exception as e:
+                logger().exception('Failed in opening zarr')
+                return jsonify(error=f'Exception: {e}'), 500
+            return jsonify({'completed': True})
+
+        spots_dict = collections.defaultdict(list)
+        for spot in req_json.get('spots'):
+            spots_dict[spot['t']].append(spot)
+        spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
+
         try:
-            zarr.open_like(zarr.open(config.zpath_flow_label, mode='r'),
-                           config.zpath_flow_label,
-                           mode='w')
+            redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+            response = _update_flow_labels(spots_dict,
+                                           config.scales,
+                                           config.zpath_flow_label,
+                                           config.flow_norm_factor)
         except RuntimeError as e:
-            logger().exception('Failed in opening zarr')
+            logger().exception('Failed in _update_flow_labels')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            logger().exception('Failed in opening zarr')
+            logger().exception('Failed in _update_flow_labels')
             return jsonify(error=f'Exception: {e}'), 500
-        finally:
-            redis_client.set(REDIS_KEY_STATE, state)
-        return jsonify({'completed': True})
-
-    spots_dict = collections.defaultdict(list)
-    for spot in req_json.get('spots'):
-        spots_dict[spot['t']].append(spot)
-    spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
-
-    state = int(redis_client.get(REDIS_KEY_STATE))
-    redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
-    try:
-        response = _update_flow_labels(spots_dict,
-                                       config.scales,
-                                       config.zpath_flow_label,
-                                       config.flow_norm_factor)
-    except RuntimeError as e:
-        logger().exception('Failed in _update_flow_labels')
-        return jsonify(error=f'Runtime Error: {e}'), 500
-    except Exception as e:
-        logger().exception('Failed in _update_flow_labels')
-        return jsonify(error=f'Exception: {e}'), 500
     finally:
-        redis_client.set(REDIS_KEY_STATE, state)
+        if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+            redis_client.set(REDIS_KEY_STATE, state)
     return response
 
 
@@ -270,8 +269,6 @@ def update_flow_labels():
 def train_flow():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
-    if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
-        return jsonify(error='Training process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = FlowTrainConfig(req_json)
@@ -280,7 +277,6 @@ def train_flow():
     for spot in req_json.get('spots'):
         spots_dict[spot['t']].append(spot)
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
-    redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
     try:
         models = load_flow_models(config.model_path,
                                   config.keep_axials,
@@ -289,7 +285,10 @@ def train_flow():
     except Exception as e:
         logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Exception: {e}'), 500
+    if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        return jsonify(error='Process is running'), 500
     try:
+        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
         _update_flow_labels(spots_dict,
                             config.scales,
                             config.zpath_flow_label,
@@ -543,53 +542,51 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
 def update_seg_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
-    req_json = request.get_json()
-    req_json['device'] = device()
-    config = SegmentationTrainConfig(req_json)
-    logger().info(config)
-    if req_json.get('reset'):
-        state = int(redis_client.get(REDIS_KEY_STATE))
+    state = int(redis_client.get(REDIS_KEY_STATE))
+    try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+        req_json = request.get_json()
+        req_json['device'] = device()
+        config = SegmentationTrainConfig(req_json)
+        logger().info(config)
+        if req_json.get('reset'):
+            try:
+                zarr.open_like(zarr.open(config.zpath_seg_label, mode='r'),
+                               config.zpath_seg_label,
+                               mode='w')
+                zarr.open_like(zarr.open(config.zpath_seg_label_vis, mode='r'),
+                               config.zpath_seg_label_vis,
+                               mode='w')
+            except RuntimeError as e:
+                logger().exception('Failed in opening zarr')
+                return jsonify(error=f'Runtime Error: {e}'), 500
+            except Exception as e:
+                logger().exception('Failed in opening zarr')
+                return jsonify(error=f'Exception: {e}'), 500
+            return jsonify({'completed': True})
+
+        spots_dict = collections.defaultdict(list)
+        for spot in req_json.get('spots'):
+            spots_dict[spot['t']].append(spot)
+        spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
+
         try:
-            zarr.open_like(zarr.open(config.zpath_seg_label, mode='r'),
-                           config.zpath_seg_label,
-                           mode='w')
-            zarr.open_like(zarr.open(config.zpath_seg_label_vis, mode='r'),
-                           config.zpath_seg_label_vis,
-                           mode='w')
+            response = _update_seg_labels(spots_dict,
+                                          config.scales,
+                                          config.zpath_input,
+                                          config.zpath_seg_label,
+                                          config.zpath_seg_label_vis,
+                                          config.auto_bg_thresh,
+                                          config.c_ratio)
         except RuntimeError as e:
-            logger().exception('Failed in opening zarr')
+            logger().exception('Failed in _update_seg_labels')
             return jsonify(error=f'Runtime Error: {e}'), 500
         except Exception as e:
-            logger().exception('Failed in opening zarr')
+            logger().exception('Failed in _update_seg_labels')
             return jsonify(error=f'Exception: {e}'), 500
-        finally:
-            redis_client.set(REDIS_KEY_STATE, state)
-        return jsonify({'completed': True})
-
-    spots_dict = collections.defaultdict(list)
-    for spot in req_json.get('spots'):
-        spots_dict[spot['t']].append(spot)
-    spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
-
-    state = int(redis_client.get(REDIS_KEY_STATE))
-    redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
-    try:
-        response = _update_seg_labels(spots_dict,
-                                      config.scales,
-                                      config.zpath_input,
-                                      config.zpath_seg_label,
-                                      config.zpath_seg_label_vis,
-                                      config.auto_bg_thresh,
-                                      config.c_ratio)
-    except RuntimeError as e:
-        logger().exception('Failed in _update_seg_labels')
-        return jsonify(error=f'Runtime Error: {e}'), 500
-    except Exception as e:
-        logger().exception('Failed in _update_seg_labels')
-        return jsonify(error=f'Exception: {e}'), 500
     finally:
-        redis_client.set(REDIS_KEY_STATE, state)
+        if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+            redis_client.set(REDIS_KEY_STATE, state)
     return response
 
 
@@ -597,8 +594,6 @@ def update_seg_labels():
 def train_seg():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
-    if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
-        return jsonify(error='Training process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = SegmentationTrainConfig(req_json)
@@ -608,7 +603,6 @@ def train_seg():
         spots_dict[spot['t']].append(spot)
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
-    redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
     try:
         models = load_seg_models(config.model_path,
                                  config.keep_axials,
@@ -620,7 +614,10 @@ def train_seg():
     except Exception as e:
         logger().exception('Failed in load_seg_models')
         return jsonify(error=f'Exception: {e}'), 500
+    if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        return jsonify(error='Process is running'), 500
     try:
+        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
         _update_seg_labels(spots_dict,
                            config.scales,
                            config.zpath_input,
@@ -740,8 +737,8 @@ def predict_seg():
 def reset_seg_models():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
-    if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.RUN.value:
-        return jsonify(error='Training process is running'), 500
+    if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        return jsonify(error='Process is running'), 500
     req_json = request.get_json()
     req_json['device'] = device()
     config = ResetConfig(req_json)

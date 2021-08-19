@@ -781,9 +781,9 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
             for error in errors:
                 logger().error(error)
         else:
-            if redis_client is not None:
-                redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
             try:
+                if redis_client is not None:
+                    redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
                 train_dataset = AutoencoderDatasetZarr(
                     zpath_input,
                     input_shape,

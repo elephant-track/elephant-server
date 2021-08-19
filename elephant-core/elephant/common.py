@@ -215,7 +215,8 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
             torch.cuda.empty_cache()
 
 
-def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None):
+def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
+             patch_size=None):
     model.eval()
     model.to(device)
     loss = 0
@@ -228,7 +229,12 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None):
                 break
 
             x, y = x.to(device), y.to(device)
-            prediction = model(x)
+            if patch_size is None:
+                prediction = model(x)
+            else:
+                prediction = torch.from_numpy(
+                    predict(model, x, patch_size, is_log=False)
+                )[None].to(device)
             loss += loss_fn(prediction, y).item()
         loss /= len(loader)
     # log to console
@@ -273,6 +279,8 @@ def _patch_predict(model, x, patch_size, func):
     overlaps = [max(1, patch_size[i] - intervals[i]) for i in range(n_dims)]
     prediction = np.zeros((model.out_conv.out_channels,) +
                           input_shape, dtype='float32')
+    sum_patches = np.prod(n_patches)
+    i_patch = 0
     for iz in range(n_patches[-3] if n_dims == 3 else 1):
         if n_dims == 3:
             slice_z = slice(intervals[-3] * iz,
@@ -307,6 +315,8 @@ def _patch_predict(model, x, patch_size, func):
                     1, 0, overlaps[-2]
                 ).reshape(1, -1, 1)
             for ix in range(n_patches[-1]):
+                i_patch += 1
+                logger().info(f'processing {i_patch} / {sum_patches}')
                 slice_x = slice(intervals[-1] * ix,
                                 intervals[-1] * ix + patch_size[-1])
                 if x.shape[-1] < slice_x.stop:

@@ -168,7 +168,8 @@ def main():
                                      config.device,
                                      eval_loader,
                                      loss_fn=loss_fn,
-                                     epoch=-1)
+                                     epoch=-1,
+                                     patch_size=config.patch_size)
                             for model in models]) / len(models)
             state_dicts = ([models[0].state_dict()] if len(models) == 1
                            else
@@ -197,7 +198,8 @@ def main():
                                      eval_loader,
                                      loss_fn=loss_fn,
                                      epoch=epoch,
-                                     tb_logger=logger)
+                                     tb_logger=logger,
+                                     patch_size=config.patch_size)
             loss /= len(models)
             if 0 < len(eval_loader):
                 if loss < min_loss:

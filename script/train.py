@@ -190,7 +190,7 @@ def main():
                       optimizer=optimizer,
                       loss_fn=loss_fn,
                       epoch=epoch,
-                      log_interval=max(1, 100 // config.batch_size),
+                      log_interval=config.log_interval,
                       tb_logger=logger)
                 if 0 < len(eval_loader):
                     loss += evaluate(model,

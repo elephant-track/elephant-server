@@ -22,5 +22,8 @@
     },
     {
         "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "training/li13_T4"
     }
 ]

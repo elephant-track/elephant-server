@@ -18,12 +18,6 @@
         "dataset_name": "ISBI2021/Fluo-N3DH-CE/02-ST-seg-3d"
     },
     {
-        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/01-ST-seg-3d"
-    },
-    {
-        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/02-ST-seg-3d"
-    },
-    {
         "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01-ST-seg-3d"
     },
     {

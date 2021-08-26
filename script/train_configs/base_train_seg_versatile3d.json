@@ -15,7 +15,7 @@
     "evalinterval": -1,
     "train_length": 10,
     "eval_length": 5,
-    "n_epochs": 50,
+    "n_epochs": 100,
     "auto_bg_thresh": 0,
     "aug_scale_factor_base": 0,
     "aug_rotation_angle": 0,
@@ -23,7 +23,7 @@
     "is_3d": true,
     "batch_size": 1,
     "nmodels": 1,
-    "model_name": "ISBI2021/versatile3d.pth",
-    "log_dir": "ISBI2021/versatile3d",
-    "epoch_start": 200
+    "model_name": "ISBI2021/versatile3d_no-MDA231.pth",
+    "log_dir": "ISBI2021/versatile3d_no-MDA231",
+    "epoch_start": 0
 }

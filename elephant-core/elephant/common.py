@@ -100,12 +100,11 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
         if redis_client is not None:
             while (int(redis_client.get(REDIS_KEY_STATE)) ==
                    TrainState.WAIT.value):
-                logger().info("waiting")
+                logger().info("waiting", "@train")
                 time.sleep(1)
             if (int(redis_client.get(REDIS_KEY_STATE)) ==
                     TrainState.IDLE.value):
                 break
-
         try:
             x, y = x.to(device), y.to(device)
 

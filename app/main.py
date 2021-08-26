@@ -223,14 +223,20 @@ def update_flow_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
+    while (state == TrainState.WAIT.value):
+        logger().info("waiting", "@/update/flow")
+        time.sleep(1)
+        state = int(redis_client.get(REDIS_KEY_STATE))
+    if (state == TrainState.IDLE.value):
+        return jsonify({'completed': False})
     try:
+        redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         req_json = request.get_json()
         req_json['device'] = device()
         config = FlowTrainConfig(req_json)
         logger().info(config)
         if req_json.get('reset'):
             try:
-                redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
                 zarr.open_like(zarr.open(config.zpath_flow_label, mode='r'),
                                config.zpath_flow_label,
                                mode='w')
@@ -248,7 +254,6 @@ def update_flow_labels():
         spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
         try:
-            redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
             response = _update_flow_labels(spots_dict,
                                            config.scales,
                                            config.zpath_flow_label,
@@ -370,8 +375,14 @@ def predict_flow():
     res_spots = []
     if 0 < config.timepoint:
         state = int(redis_client.get(REDIS_KEY_STATE))
-        redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+        while (state == TrainState.WAIT.value):
+            logger().info("waiting", "@/predict/flow")
+            time.sleep(1)
+            state = int(redis_client.get(REDIS_KEY_STATE))
+        if (state == TrainState.IDLE.value):
+            return jsonify({'completed': False})
         try:
+            redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
             spots = req_json.get('spots')
             res_spots = spots_with_flow(config, spots)
         except RuntimeError as e:
@@ -383,8 +394,9 @@ def predict_flow():
         finally:
             gc.collect()
             torch.cuda.empty_cache()
-            redis_client.set(REDIS_KEY_STATE, state)
-    return jsonify({'spots': res_spots})
+            if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+                redis_client.set(REDIS_KEY_STATE, state)
+    return jsonify({'spots': res_spots, 'completed': True})
 
 
 @app.route('/reset/flow', methods=['POST'])
@@ -543,6 +555,12 @@ def update_seg_labels():
     if request.headers['Content-Type'] != 'application/json':
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
+    while (state == TrainState.WAIT.value):
+        logger().info("waiting", "@/update/seg")
+        time.sleep(1)
+        state = int(redis_client.get(REDIS_KEY_STATE))
+    if (state == TrainState.IDLE.value):
+        return jsonify({'completed': False})
     try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         req_json = request.get_json()
@@ -712,8 +730,14 @@ def predict_seg():
     config = SegmentationEvalConfig(req_json)
     logger().info(config)
     state = int(redis_client.get(REDIS_KEY_STATE))
-    redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+    while (state == TrainState.WAIT.value):
+        logger().info("waiting", "@/predict/seg")
+        time.sleep(1)
+        state = int(redis_client.get(REDIS_KEY_STATE))
+    if (state == TrainState.IDLE.value):
+        return jsonify({'completed': False})
     try:
+        redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         spots = detect_spots(config, redis_client)
         get_mq_connection().channel().basic_publish(
             exchange='',
@@ -729,8 +753,9 @@ def predict_seg():
     finally:
         gc.collect()
         torch.cuda.empty_cache()
-        redis_client.set(REDIS_KEY_STATE, state)
-    return jsonify({'spots': spots})
+        if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+            redis_client.set(REDIS_KEY_STATE, state)
+    return jsonify({'spots': spots, 'completed': True})
 
 
 @app.route('/reset/seg', methods=['POST'])
@@ -782,8 +807,14 @@ def export_ctc():
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
     state = int(redis_client.get(REDIS_KEY_STATE))
-    redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
+    while (state == TrainState.WAIT.value):
+        logger().info("waiting", "@/export/ctc")
+        time.sleep(1)
+        state = int(redis_client.get(REDIS_KEY_STATE))
+    if (state == TrainState.IDLE.value):
+        return make_response('', 204)
     try:
+        redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         result = export_ctc_labels(config, spots_dict, redis_client)
         if isinstance(result, str):
             resp = send_file(result)
@@ -799,7 +830,8 @@ def export_ctc():
         logger().exception('Failed in export_ctc_labels')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
-        redis_client.set(REDIS_KEY_STATE, state)
+        if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+            redis_client.set(REDIS_KEY_STATE, state)
     return resp
 
 

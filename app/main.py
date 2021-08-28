@@ -227,8 +227,8 @@ def update_flow_labels():
         logger().info("waiting", "@/update/flow")
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
-    if (state == TrainState.IDLE.value):
-        return jsonify({'completed': False})
+        if (state == TrainState.IDLE.value):
+            return jsonify({'completed': False})
     try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         req_json = request.get_json()
@@ -379,8 +379,8 @@ def predict_flow():
             logger().info("waiting", "@/predict/flow")
             time.sleep(1)
             state = int(redis_client.get(REDIS_KEY_STATE))
-        if (state == TrainState.IDLE.value):
-            return jsonify({'completed': False})
+            if (state == TrainState.IDLE.value):
+                return jsonify({'completed': False})
         try:
             redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
             spots = req_json.get('spots')
@@ -559,8 +559,8 @@ def update_seg_labels():
         logger().info("waiting", "@/update/seg")
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
-    if (state == TrainState.IDLE.value):
-        return jsonify({'completed': False})
+        if (state == TrainState.IDLE.value):
+            return jsonify({'completed': False})
     try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         req_json = request.get_json()
@@ -734,8 +734,8 @@ def predict_seg():
         logger().info("waiting", "@/predict/seg")
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
-    if (state == TrainState.IDLE.value):
-        return jsonify({'completed': False})
+        if (state == TrainState.IDLE.value):
+            return jsonify({'completed': False})
     try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         spots = detect_spots(config, redis_client)
@@ -811,8 +811,8 @@ def export_ctc():
         logger().info("waiting", "@/export/ctc")
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
-    if (state == TrainState.IDLE.value):
-        return make_response('', 204)
+        if (state == TrainState.IDLE.value):
+            return make_response('', 204)
     try:
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         result = export_ctc_labels(config, spots_dict, redis_client)

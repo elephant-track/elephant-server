@@ -632,7 +632,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
     )
     origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
     labels = skimage.measure.label(p_thresh < c_probs)
-    regions = skimage.measure.regionprops(labels, c_probs)
+    regions = skimage.measure.regionprops(labels)
 
     if scales is None:
         scales = (1.,) * n_dims
@@ -677,7 +677,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
         # https://stackoverflow.com/questions/22146383/covariance-matrix-of-an-ellipse
         # https://github.com/scikit-image/scikit-image/blob/master/skimage/measure/_regionprops.py#L288
         radii = 2 * np.sqrt(eigvals)
-        radii /= (c_ratio / region.mean_intensity)
+        radii /= c_ratio
         radii = np.array([radii[i] if 0 < radii[i] else max(
             r_min, scales[i]) for i in range(len(radii))])
         if (radii < r_min).any():

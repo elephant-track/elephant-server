@@ -236,7 +236,8 @@ def load_models(config, command):
                                  n_crops=config.n_crops,
                                  zpath_input=config.zpath_input,
                                  crop_size=config.crop_size,
-                                 scales=config.scales)
+                                 scales=config.scales,
+                                 is_pretrained=config.is_pretrained)
     elif command == 'flow':
         models = load_flow_models(config.model_path,
                                   config.keep_axials,

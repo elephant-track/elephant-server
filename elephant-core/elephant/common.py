@@ -849,7 +849,7 @@ def init_flow_models(model_path, keep_axials, device, is_3d=True, n_models=1):
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
                     is_decoder_only=False, is_pad=False, is_3d=True,
                     n_models=1, n_crops=5, zpath_input=None, crop_size=None,
-                    scales=None, redis_client=None):
+                    scales=None, redis_client=None, is_pretrained=True):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
@@ -863,7 +863,8 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
                             zpath_input,
                             crop_size,
                             scales,
-                            redis_client=redis_client)
+                            redis_client=redis_client,
+                            is_pretrained=is_pretrained)
         finally:
             gc.collect()
             torch.cuda.empty_cache()

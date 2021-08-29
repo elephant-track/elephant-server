@@ -100,6 +100,7 @@ class BaseConfig():
 class ResetConfig(BaseConfig):
     def __init__(self, config):
         super().__init__(config)
+        self.is_pretrained = config.get('is_pretrained', False)
         self.n_models = config.get('nmodels', 1)
         self.n_crops = config.get('n_crops', 5)
 

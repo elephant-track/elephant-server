@@ -171,9 +171,9 @@ class SegmentationLoss(nn.Module):
         self.nll_loss /= count
         self.center_loss /= count
         self.smooth_loss /= count
-        return (self.nll_loss * 0.1 +
-                self.center_loss * 0.9 +
-                self.smooth_loss * 0)
+        return (self.nll_loss * 1 / 7 +
+                self.center_loss * 5 / 7 +
+                self.smooth_loss * 1 / 7)
 
 
 class AutoencoderLoss(nn.Module):

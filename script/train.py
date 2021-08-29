@@ -212,8 +212,9 @@ def main():
                     if len(models) == 1:
                         state_dicts = [state_dicts]
                 else:
-                    for model, state_dict in zip(models, state_dicts):
-                        model.load_state_dict(state_dict)
+                    pass
+                    # for model, state_dict in zip(models, state_dicts):
+                    #     model.load_state_dict(state_dict)
             torch.save(models[0].state_dict() if len(models) == 1 else
                        [model.state_dict() for model in models],
                        config.model_path)

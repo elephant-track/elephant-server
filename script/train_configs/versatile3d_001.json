@@ -1,0 +1,35 @@
+[
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/01-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/01-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/01-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01-ST-seg-3d"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02-ST-seg-3d"
+    },
+    {
+        "dataset_name": "training/li13_T4"
+    }
+]

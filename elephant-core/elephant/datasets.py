@@ -47,9 +47,9 @@ from elephant.redis_util import TrainState
 
 class SegmentationDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_seg_label, indices, img_size,
-                 crop_size, n_crops, scales=None, is_livemode=False,
-                 redis_client=None, scale_factor_base=0.2, is_ae=False,
-                 rotation_angle=None, contrast=0.5, is_eval=False,
+                 crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
+                 is_livemode=False, redis_client=None, scale_factor_base=0.2,
+                 is_ae=False, rotation_angle=None, contrast=0.5, is_eval=False,
                  length=None, adaptive_length=False):
         if len(img_size) != len(crop_size):
             raise ValueError(
@@ -101,6 +101,7 @@ class SegmentationDatasetZarr(du.Dataset):
         self.contrast = contrast
         self.is_eval = is_eval
         self.length = length
+        self.keep_axials = keep_axials
 
     def __len__(self):
         if self.length is not None:
@@ -137,7 +138,8 @@ class SegmentationDatasetZarr(du.Dataset):
                             break
                     if (int(self.redis_c.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
-                        return torch.tensor(-100.), torch.tensor(-100)
+                        return ((torch.tensor(-100.), self.keep_axials),
+                                torch.tensor(-100))
             elif self.length is not None:
                 i_frame = np.random.choice(self.indices)
             else:
@@ -153,7 +155,7 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input[None])
             tensor_label = torch.from_numpy(img_label - 1).long()
-            return tensor_input, tensor_label
+            return (tensor_input, self.keep_axials), tensor_label
         if not self.is_ae and self.contrast:
             fg_index = np.isin(img_label, (1, 2, 4, 5))
             bg_index = np.isin(img_label, (0, 3))
@@ -271,24 +273,25 @@ class SegmentationDatasetZarr(du.Dataset):
         else:
             tensor_input = tensor_input[None]
         if self.is_ae:
-            return tensor_input, tensor_input
+            return (tensor_input, self.keep_axials), tensor_input
         tensor_label = tensor_label.view(self.crop_size)
         flip_dims = [-(1 + i)
                      for i, v in enumerate(torch.rand(self.n_dims)) if v < 0.5]
         tensor_input.data = torch.flip(tensor_input, flip_dims)
         tensor_label.data = torch.flip(tensor_label, flip_dims)
-        return tensor_input, tensor_label
+        return (tensor_input, self.keep_axials), tensor_label
 
 
 class AutoencoderDatasetZarr(SegmentationDatasetZarr):
     def __init__(self, zpath_input, img_size, crop_size, n_crops,
-                 scales=None, scale_factor_base=0.2):
+                 keep_axials=(True,) * 4, scales=None, scale_factor_base=0.2):
         super().__init__(zpath_input,
                          None,
                          None,
                          img_size,
                          crop_size,
                          n_crops,
+                         keep_axials=keep_axials,
                          scales=scales,
                          scale_factor_base=scale_factor_base,
                          is_ae=True)
@@ -296,8 +299,8 @@ class AutoencoderDatasetZarr(SegmentationDatasetZarr):
 
 class FlowDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_flow_label, indices, img_size,
-                 crop_size, n_crops, scales=None, scale_factor_base=0.2,
-                 rotation_angle=None):
+                 crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
+                 scale_factor_base=0.2, rotation_angle=None):
         if len(img_size) != len(crop_size):
             raise ValueError(
                 'img_size: {} and crop_size: {} should have the same length'
@@ -334,6 +337,7 @@ class FlowDatasetZarr(du.Dataset):
             )
         ) for i in range(self.n_dims)]
         self.rotation_angle = rotation_angle
+        self.keep_axials = keep_axials
 
     def __len__(self):
         return len(self.indices) * self.n_crops
@@ -463,4 +467,4 @@ class FlowDatasetZarr(du.Dataset):
             tensor_input = tensor_input.view((2,) + self.crop_size)
         # Channel order: (flow_x, flow_y, flow_z, mask, input_t0, input_t1)
         tensor_target = torch.cat((tensor_label, tensor_input), )
-        return tensor_input, tensor_target
+        return (tensor_input, self.keep_axials), tensor_target

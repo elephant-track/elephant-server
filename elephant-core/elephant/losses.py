@@ -273,7 +273,7 @@ class FlowLoss(nn.Module):
                     target[:, :self.n_dims].shape))
         if self.is_oldloss:
             cr_loss = self.criterion(
-                prediction, target[:, :self.n_dims]) * target[:, self.n_dims:-1]
+                prediction, target[:, :self.n_dims]) * target[:, -3:-2]
             self.instance_loss = sum(
                 cr_loss[:, d].mean() * self.dim_weights[d]
                 for d in range(self.n_dims)
@@ -327,8 +327,11 @@ class FlowLoss(nn.Module):
                 self.smooth_loss * 1e-4
             )
 
+        loss_weights = [1.0, 1e-2, 1e-2]
+        loss_weights = [w / sum(loss_weights) for w in loss_weights]
+
         return (
-            self.instance_loss +
-            self.ssim_loss * 1e-2 +
-            self.smooth_loss * 1e-2
+            self.instance_loss * loss_weights[0] +
+            self.ssim_loss * loss_weights[1] +
+            self.smooth_loss * loss_weights[2]
         )

@@ -284,7 +284,6 @@ def train_flow():
     spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
     try:
         models = load_flow_models(config.model_path,
-                                  config.keep_axials,
                                   config.device,
                                   is_3d=config.is_3d)
     except Exception as e:
@@ -307,6 +306,7 @@ def train_flow():
             input_shape,
             config.crop_size,
             config.n_crops,
+            keep_axials=config.keep_axials,
             scales=config.scales,
             scale_factor_base=config.scale_factor_base,
             rotation_angle=config.rotation_angle,
@@ -652,6 +652,7 @@ def train_seg():
             input_shape,
             config.crop_size,
             config.n_crops,
+            config.keep_axials,
             scales=config.scales,
             is_livemode=config.is_livemode,
             redis_client=redis_client,

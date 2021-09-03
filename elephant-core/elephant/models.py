@@ -102,8 +102,7 @@ class UNet(nn.Module):
         return Interpolate(scale_factor=(2, 2, 2))
 
     def __init__(self, in_channels=1, out_channels=1, final_activation=None,
-                 keep_axials=(True, True, True, False), is_pad=False,
-                 is_3d=True):
+                 is_pad=False, is_3d=True):
         super().__init__()
 
         # the depth (= number of encoder / decoder levels) is
@@ -114,17 +113,13 @@ class UNet(nn.Module):
         self.n_dims = 2 + self.is_3d
         if is_3d:
             self.conv = nn.Conv3d
-            self.base_size = (2**keep_axials.count(False), 16, 16)
             self.interpolate_mode = 'trilinear'
         else:
             self.conv = nn.Conv2d
-            self.base_size = (16, 16)
             self.interpolate_mode = 'bilinear'
 
         # pad edges if specified
         self.is_pad = is_pad
-        # the order for pad size is (left, right, top, bottom, front, back)
-        self.pad_size = sum([[x//2, ] * 2 for x in self.base_size[::-1]], [])
 
         # the final activation must either be None or a Module
         if final_activation is not None:
@@ -150,20 +145,7 @@ class UNet(nn.Module):
             self._decoder_block(96, 32),
             self._decoder_block(48, 16)
         ])
-        # the pooling layers; we use 2x2 MaxPooling
-        self.poolers = nn.ModuleList([
-            self._pooler(keep_axial=keep_axials[0]),
-            self._pooler(keep_axial=keep_axials[1]),
-            self._pooler(keep_axial=keep_axials[2]),
-            self._pooler(keep_axial=keep_axials[3])
-        ])
-        # the upsampling layers
-        self.upsamplers = nn.ModuleList([
-            self._upsampler(keep_axial=keep_axials[3]),
-            self._upsampler(keep_axial=keep_axials[2]),
-            self._upsampler(keep_axial=keep_axials[1]),
-            self._upsampler(keep_axial=keep_axials[0])
-        ])
+
         # output conv and activation
         # the output conv is not followed by a non-linearity, because we apply
         # activation afterwards
@@ -177,10 +159,10 @@ class UNet(nn.Module):
                 if m.bias is not None:
                     m.bias.data.zero_()
 
-    def _conform(self, input):
+    def _conform(self, input, base_size):
         self.org_size = input.size()[-self.n_dims:]
         dst_size = [get_next_multiple(s, base) for s, base in
-                    zip(self.org_size, self.base_size)]
+                    zip(self.org_size, base_size)]
         if list(self.org_size) == dst_size:
             return input, False
         return (F.interpolate(input,
@@ -189,18 +171,25 @@ class UNet(nn.Module):
                               align_corners=True),
                 True)
 
-    def forward(self, input):
+    def forward(self, input, keep_axials):
+        if self.is_3d:
+            base_size = (2**keep_axials.count(False), 16, 16)
+        else:
+            base_size = (16, 16)
         # pad if specified
         if self.is_pad:
-            input = F.pad(input, self.pad_size, 'replicate')
+            # the order for pad size is (left, right, top, bottom, front, back)
+            pad_size = sum([[x//2, ] * 2 for x in base_size[::-1]], [])
+            input = F.pad(input, pad_size, 'replicate')
         # resize if required
-        x, is_resized = self._conform(input)
+        x, is_resized = self._conform(input, base_size)
         # apply encoder path
         encoder_out = []
         for level in range(self.depth):
             x = self.encoder[level](x)
             encoder_out.append(x)
-            x = self.poolers[level](x)
+            # the pooling layers; we use 2x2 MaxPooling
+            x = self._pooler(keep_axials[level])(x)
 
         # apply base
         x = self.base(x)
@@ -208,8 +197,10 @@ class UNet(nn.Module):
         # apply decoder path
         encoder_out = encoder_out[::-1]
         for level in range(self.depth):
-            x = self.upsamplers[level](x)
+            # the upsampling layers
+            x = self._upsampler(keep_axials[::-1][level])(x)
             x = self.decoder[level](torch.cat((encoder_out[level], x), dim=1))
+
         # apply output conv and activation (if given)
         x = self.out_conv(x)
         if self.activation is not None:
@@ -229,12 +220,11 @@ class UNet(nn.Module):
         return x
 
     @ classmethod
-    def three_class_segmentation(cls, keep_axials=(False, False, False, False),
-                                 is_eval=False, device=None, state_dict=None,
-                                 is_decoder_only=False, is_pad=False,
-                                 is_3d=True):
+    def three_class_segmentation(cls, is_eval=False, device=None,
+                                 state_dict=None, is_decoder_only=False,
+                                 is_pad=False, is_3d=True):
         model = cls(1, 3, final_activation=torch.nn.LogSoftmax(
-            dim=1), keep_axials=keep_axials, is_pad=is_pad, is_3d=is_3d)
+            dim=1), is_pad=is_pad, is_3d=is_3d)
         if state_dict:
             model.load_state_dict(state_dict)
         if device:
@@ -289,11 +279,10 @@ class FlowResNet(UNet):
         return self._res_block(in_channels, out_channels)
 
     @ classmethod
-    def three_dimensional_flow(cls, keep_axials=(False, False, False, False),
-                               is_eval=False, device=None, state_dict=None,
+    def three_dimensional_flow(cls, is_eval=False, device=None, state_dict=None,
                                is_decoder_only=False, is_pad=False, is_3d=True):
         model = cls(2, 2 + is_3d, final_activation=nn.Tanh(),
-                    keep_axials=keep_axials, is_pad=is_pad, is_3d=is_3d)
+                    is_pad=is_pad, is_3d=is_3d)
         if state_dict:
             model.load_state_dict(state_dict)
         if device:

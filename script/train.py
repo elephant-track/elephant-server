@@ -105,6 +105,7 @@ def main():
                 input_shape,
                 config.crop_size,
                 config.n_crops,
+                keep_axials=config.keep_axials,
                 scales=config.scales,
                 scale_factor_base=config.scale_factor_base,
                 contrast=config.contrast,
@@ -118,6 +119,7 @@ def main():
                 input_shape,
                 input_shape,
                 1,
+                keep_axials=config.keep_axials,
                 is_eval=True,
                 length=eval_length,
                 adaptive_length=adaptive_length,
@@ -131,6 +133,7 @@ def main():
                 input_shape,
                 config.crop_size,
                 config.n_crops,
+                keep_axials=config.keep_axials,
                 scales=config.scales,
                 scale_factor_base=config.scale_factor_base,
                 rotation_angle=config.rotation_angle,
@@ -142,6 +145,7 @@ def main():
                 input_shape,
                 config.crop_size,
                 config.n_crops,
+                keep_axials=config.keep_axials,
                 scales=config.scales,
                 scale_factor_base=0.0,
             ))
@@ -241,7 +245,6 @@ def load_models(config, command):
                                  is_pretrained=config.is_pretrained)
     elif command == 'flow':
         models = load_flow_models(config.model_path,
-                                  config.keep_axials,
                                   config.device,
                                   is_3d=config.is_3d)
     return models

@@ -92,7 +92,7 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
         instance_loss_avg = 0
         ssim_loss_avg = 0
         smooth_loss_avg = 0
-    for batch_id, (x, y) in enumerate(loader):
+    for batch_id, ((x, keep_axials), y) in enumerate(loader):
         # (torch.tensor(-100.), torch.tensor(-100)) is returned when aborted
         if (torch.eq(x, torch.tensor(-100.)).any() and
                 torch.eq(y, torch.tensor(-100)).any()):
@@ -115,7 +115,7 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
                     g['lr'] = float(redis_client.get(REDIS_KEY_LR))
 
             optimizer.zero_grad()
-            prediction = model(x)
+            prediction = model(x, keep_axials)
             loss = loss_fn(prediction, y)
             loss.backward()
             optimizer.step()
@@ -224,7 +224,7 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
     model.to(device)
     loss = 0
     with torch.no_grad():
-        for batch_id, (x, y) in enumerate(loader):
+        for batch_id, ((x, keep_axials), y) in enumerate(loader):
             # (torch.tensor(-100.), torch.tensor(-100))
             # is returned when aborted
             if (torch.eq(x, torch.tensor(-100.)).any() and
@@ -233,10 +233,10 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
 
             x, y = x.to(device), y.to(device)
             if patch_size is None:
-                prediction = model(x)
+                prediction = model(x, keep_axials)
             else:
                 prediction = torch.from_numpy(
-                    predict(model, x, patch_size, is_log=False)
+                    predict(model, x, keep_axials, patch_size, is_log=False)
                 )[None].to(device)
             loss += loss_fn(prediction, y).item()
         loss /= len(loader)
@@ -259,7 +259,7 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
     return loss
 
 
-def _patch_predict(model, x, patch_size, func):
+def _patch_predict(model, x, keep_axials, patch_size, func):
     n_dims = len(patch_size)
     input_shape = x.shape[-n_dims:]
     # all elements in patch shape should be smaller than or equal to those of
@@ -336,19 +336,21 @@ def _patch_predict(model, x, patch_size, func):
                 slices = [slice(None), slice(None), slice_y, slice_x]
                 if n_dims == 3:
                     slices.insert(2, slice_z)
-                y = func(model(x[slices])[0].detach().cpu().numpy())
+                y = func(
+                    model(x[slices], keep_axials)[0].detach().cpu().numpy()
+                )
                 if n_dims == 2:
                     patch_weight_zyx = patch_weight_zyx[0]
                 prediction[tuple(slices[1:])] += y * patch_weight_zyx
     return prediction
 
 
-def predict(model, x, patch_size=None, is_log=True):
+def predict(model, x, keep_axials, patch_size=None, is_log=True):
     func = (lambda x: np.exp(x)) if is_log else (lambda x: x)
     if patch_size is not None:
-        return _patch_predict(model, x, patch_size, func)
+        return _patch_predict(model, x, keep_axials, patch_size, func)
     else:
-        return func(model(x)[0].detach().cpu().numpy())
+        return func(model(x, keep_axials)[0].detach().cpu().numpy())
 
 
 def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
@@ -385,7 +387,11 @@ def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
         img = np.pad(img, pad_shape, mode='constant', constant_values=0)
     with torch.no_grad():
         x = torch.from_numpy(img[np.newaxis, np.newaxis]).to(device)
-        prediction = np.mean([predict(model, x, patch_size, is_log=True)
+        prediction = np.mean([predict(model,
+                                      x,
+                                      keep_axials,
+                                      patch_size,
+                                      is_log=True)
                               for model in models], axis=0)
     if patch_size is None:
         prediction = prediction[slices]
@@ -481,7 +487,6 @@ def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
                          is_3d):
     img = normalize_zero_one(img.astype('float32'))
     models = load_flow_models(model_path,
-                              keep_axials,
                               device,
                               is_eval=True,
                               is_3d=is_3d)
@@ -777,14 +782,12 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
         torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
                    model_path)
         models = [UNet.three_class_segmentation(
-            keep_axials,
             device=device,
             state_dict=state_dict,
             is_3d=is_3d,
         ) for state_dict in state_dicts]
     else:
         models = [UNet.three_class_segmentation(
-            keep_axials,
             device=device,
             is_3d=is_3d,
         ) for i in range(n_models)]
@@ -808,6 +811,7 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                         input_shape,
                         crop_size,
                         n_crops,
+                        keep_axials=keep_axials,
                         scales=scales,
                         scale_factor_base=0.2,
                     )
@@ -835,9 +839,8 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
             model.state_dict() for model in models], model_path)
 
 
-def init_flow_models(model_path, keep_axials, device, is_3d=True, n_models=1):
+def init_flow_models(model_path, device, is_3d=True, n_models=1):
     models = [FlowResNet.three_dimensional_flow(
-        keep_axials,
         device=device,
         is_3d=is_3d,
     ) for i in range(n_models)]
@@ -873,7 +876,6 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
         checkpoint, list) else [checkpoint]
     # print(len(state_dicts), 'models will be ensembled')
     models = [UNet.three_class_segmentation(
-        keep_axials,
         is_eval=is_eval,
         device=device,
         state_dict=state_dict,
@@ -884,14 +886,13 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
     return models
 
 
-def load_flow_models(model_path, keep_axials, device, is_eval=False,
+def load_flow_models(model_path, device, is_eval=False,
                      is_decoder_only=False, is_pad=False, is_3d=True,
                      n_models=1):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
         init_flow_models(model_path,
-                         keep_axials,
                          device,
                          is_3d,
                          n_models)
@@ -900,7 +901,6 @@ def load_flow_models(model_path, keep_axials, device, is_eval=False,
         checkpoint, list) else [checkpoint]
     # print(len(state_dicts), 'models will be ensembled')
     models = [FlowResNet.three_dimensional_flow(
-        keep_axials=keep_axials,
         is_eval=is_eval,
         device=device,
         state_dict=state_dict,

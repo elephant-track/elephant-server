@@ -165,7 +165,7 @@ class SegmentationTrainConfig(SegmentationEvalConfig):
                 f'contrast should be in [0, 1] but got {self.contrast}')
         self.class_weights = config.get('class_weights',
                                         DEFAULT_SEG_CLASS_WEIGHTS)
-        self.false_weight = config.get('false_weight')
+        self.false_weight = config.get('false_weight', 10)
         if config.get('log_dir') is not None:
             self.log_dir = os.path.join(LOGS_DIR, config.get('log_dir'))
         if self.dataset_name is not None:

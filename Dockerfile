@@ -28,7 +28,7 @@ RUN conda install --override-channels -c main -c conda-forge \
     scikit-learn=0.23.1 \
     scikit-image=0.17.2 \
     scipy=1.4.1 \
-    tensorflow=2.3.0 \
+    tensorflow=2.4.0 \
     tensorboardX=2.1 \
     tqdm=4.48.2 \
     uwsgi=2.0.18 \

@@ -1,6 +1,6 @@
 [
     {
-        "dataset_name": "Fluo-N3DH-CE_01",
+        "dataset_name": "check_overfitting/Fluo-N3DH-CE_01",
         "t_min": 100,
         "t_max": 100,
         "device": "cuda",

@@ -771,21 +771,17 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                     n_crops=0, zpath_input=None, crop_size=None, scales=None,
-                    redis_client=None, is_pretrained=True):
+                    redis_client=None, url='Versatile'):
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    if is_pretrained:
+    if url == 'Versatile':
         url = f'{MODEL_URL_ROOT}versatile{2+is_3d}d.pth'
-        print(url)
+    if url is not None:
+        logger().info(f'Loading a pretrained model: {url}')
         checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
         state_dicts = checkpoint if isinstance(
             checkpoint, list) else [checkpoint]
         torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
                    model_path)
-        models = [UNet.three_class_segmentation(
-            device=device,
-            state_dict=state_dict,
-            is_3d=is_3d,
-        ) for state_dict in state_dicts]
     else:
         models = [UNet.three_class_segmentation(
             device=device,
@@ -839,20 +835,31 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
             model.state_dict() for model in models], model_path)
 
 
-def init_flow_models(model_path, device, is_3d=True, n_models=1):
-    models = [FlowResNet.three_dimensional_flow(
-        device=device,
-        is_3d=is_3d,
-    ) for i in range(n_models)]
+def init_flow_models(model_path, device, is_3d=True, n_models=1,
+                     url='Versatile'):
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(models[0].state_dict() if len(models) == 1 else [
-        model.state_dict() for model in models], model_path)
+    if url == 'Versatile':
+        url = f'{MODEL_URL_ROOT}Fluo-N3DH-CE_flow.pth'
+    if url is not None:
+        logger().info(f'Loading a pretrained model: {url}')
+        checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
+                   model_path)
+    else:
+        models = [FlowResNet.three_dimensional_flow(
+            device=device,
+            is_3d=is_3d,
+        ) for i in range(n_models)]
+        torch.save(models[0].state_dict() if len(models) == 1 else [
+            model.state_dict() for model in models], model_path)
 
 
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
                     is_decoder_only=False, is_pad=False, is_3d=True,
                     n_models=1, n_crops=5, zpath_input=None, crop_size=None,
-                    scales=None, redis_client=None, is_pretrained=True):
+                    scales=None, redis_client=None, url='Versatile'):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
@@ -867,7 +874,7 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
                             crop_size,
                             scales,
                             redis_client=redis_client,
-                            is_pretrained=is_pretrained)
+                            url=url)
         finally:
             gc.collect()
             torch.cuda.empty_cache()
@@ -888,14 +895,15 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
 
 def load_flow_models(model_path, device, is_eval=False,
                      is_decoder_only=False, is_pad=False, is_3d=True,
-                     n_models=1):
+                     n_models=1, url='Versatile'):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
         init_flow_models(model_path,
                          device,
                          is_3d,
-                         n_models)
+                         n_models,
+                         url=url)
     checkpoint = torch.load(model_path, map_location=device)
     state_dicts = checkpoint if isinstance(
         checkpoint, list) else [checkpoint]

@@ -242,11 +242,12 @@ def load_models(config, command):
                                  zpath_input=config.zpath_input,
                                  crop_size=config.crop_size,
                                  scales=config.scales,
-                                 is_pretrained=config.is_pretrained)
+                                 url=config.url)
     elif command == 'flow':
         models = load_flow_models(config.model_path,
                                   config.device,
-                                  is_3d=config.is_3d)
+                                  is_3d=config.is_3d,
+                                  url=config.url)
     return models
 
 

@@ -408,7 +408,10 @@ def reset_flow_models():
     config = ResetConfig(req_json)
     logger().info(config)
     try:
-        init_flow_models(config)
+        init_flow_models(config.model_path,
+                         config.device,
+                         config.is_3d,
+                         url=config.url)
     except RuntimeError as e:
         logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -779,7 +782,8 @@ def reset_seg_models():
                         config.zpath_input,
                         config.crop_size,
                         config.scales,
-                        redis_client=redis_client)
+                        redis_client=redis_client,
+                        url=config.url)
     except RuntimeError as e:
         logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500

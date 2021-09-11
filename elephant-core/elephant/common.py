@@ -507,7 +507,7 @@ def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
         x = torch.from_numpy(img[np.newaxis]).to(device)
         prediction = np.mean(
             [
-                predict(model, x, patch_size, is_log=False)
+                predict(model, x, keep_axials, patch_size, is_log=False)
                 for model in models
             ],
             axis=0)
@@ -586,7 +586,6 @@ def spots_with_flow(config, spots):
         # https://stackoverflow.com/questions/3431825/generating-an-md5-checksum-of-a-file#answer-3431838
         if not Path(config.model_path).exists():
             init_flow_models(config.model_path,
-                             config.keep_axials,
                              config.device,
                              config.is_3d)
         hash_md5 = hashlib.md5()

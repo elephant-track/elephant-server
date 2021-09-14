@@ -85,19 +85,20 @@ def main():
         train_length = config_dict.get('train_length')
         eval_length = config_dict.get('eval_length')
         adaptive_length = config_dict.get('adaptive_length', False)
-        for ti, t in enumerate(range(
-                t_min,
-                t_max + (args.command == 'seg'))):
-            if eval_interval is not None and eval_interval == -1:
-                train_index.append(t)
-                eval_index.append(t)
-            elif eval_interval is not None and (ti + 1) % eval_interval == 0:
-                eval_index.append(t)
-            else:
-                train_index.append(t)
         if args.command == 'seg':
             config = SegmentationTrainConfig(config_dict)
             print(config)
+            za_label = zarr.open(config.zpath_seg_label, mode='r')
+            for ti, t in enumerate(range(t_min, t_max + 1)):
+                if 0 < za_label[t].max():
+                    if eval_interval is not None and eval_interval == -1:
+                        train_index.append(t)
+                        eval_index.append(t)
+                    elif (eval_interval is not None and
+                          (ti + 1) % eval_interval == 0):
+                        eval_index.append(t)
+                    else:
+                        train_index.append(t)
             train_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
                 config.zpath_seg_label,
@@ -126,6 +127,18 @@ def main():
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)
+            print(config)
+            za_label = zarr.open(config.zpath_flow_label, mode='r')
+            for ti, t in enumerate(range(t_min, t_max)):
+                if 0 < za_label[t][-1].max():
+                    if eval_interval is not None and eval_interval == -1:
+                        train_index.append(t)
+                        eval_index.append(t)
+                    elif (eval_interval is not None and
+                          (ti + 1) % eval_interval == 0):
+                        eval_index.append(t)
+                    else:
+                        train_index.append(t)
             train_datasets.append(FlowDatasetZarr(
                 config.zpath_input,
                 config.zpath_flow_label,

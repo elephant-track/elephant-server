@@ -1,8 +1,8 @@
 [
     {
         "dataset_name": "check_overfitting/Fluo-N3DH-CE_01",
-        "t_min": 100,
-        "t_max": 100,
+        "t_min": 0,
+        "t_max": 194,
         "device": "cuda",
         "crop_size": [
             384,
@@ -24,14 +24,14 @@
         "is_3d": true,
         "batch_size": 1,
         "nmodels": 1,
-        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
-        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials_t000-t100-t194.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials_t000-t100-t194",
         "epoch_start": 0
     },
     {
         "dataset_name": "check_overfitting/Fluo-N3DH-CE_02",
-        "t_min": 100,
-        "t_max": 100,
+        "t_min": 0,
+        "t_max": 189,
         "device": "cuda",
         "patch": [
             544,
@@ -59,8 +59,8 @@
         "is_3d": true,
         "batch_size": 1,
         "nmodels": 1,
-        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
-        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials_t000-t100-t194.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials_t000-t100-t194",
         "epoch_start": 0
     }
 ]

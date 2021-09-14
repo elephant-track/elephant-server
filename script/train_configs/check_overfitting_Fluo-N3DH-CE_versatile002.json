@@ -24,8 +24,8 @@
         "is_3d": true,
         "batch_size": 1,
         "nmodels": 1,
-        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
-        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "model_name": "check_overfitting_Fluo-N3DH-CE_versatile002_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_versatile002_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
         "epoch_start": 0
     },
     {
@@ -59,8 +59,8 @@
         "is_3d": true,
         "batch_size": 1,
         "nmodels": 1,
-        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
-        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "model_name": "check_overfitting_Fluo-N3DH-CE_versatile002_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_versatile002_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
         "epoch_start": 0
     }
 ]

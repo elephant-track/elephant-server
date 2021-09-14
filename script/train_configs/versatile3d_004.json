@@ -1,29 +1,83 @@
 [
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01-ST-seg-3d",
+        "scales": [
+            0.126,
+            0.126,
+            1.0
+        ],
+        "n_keep_axials": 3
     },
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02-ST-seg-3d",
+        "scales": [
+            0.126,
+            0.126,
+            1.0
+        ],
+        "n_keep_axials": 3
     },
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-H157/01-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/01-ST-seg-3d",
+        "scales": [
+            0.126,
+            0.126,
+            0.5
+        ],
+        "n_keep_axials": 2
     },
     {
-        "dataset_name": "ISBI2021/Fluo-C3DH-H157/02-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/02-ST-seg-3d",
+        "scales": [
+            0.126,
+            0.126,
+            0.5
+        ],
+        "n_keep_axials": 2
     },
     {
-        "dataset_name": "ISBI2021/Fluo-N3DH-CE/01-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/01-ST-seg-3d",
+        "scales": [
+            0.09,
+            0.09,
+            1.0
+        ],
+        "n_keep_axials": 3
     },
     {
-        "dataset_name": "ISBI2021/Fluo-N3DH-CE/02-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/02-ST-seg-3d",
+        "scales": [
+            0.09,
+            0.09,
+            1.0
+        ],
+        "n_keep_axials": 3
     },
     {
-        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01-ST-seg-3d",
+        "scales": [
+            0.202,
+            0.202,
+            1.0
+        ],
+        "n_keep_axials": 2
     },
     {
-        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02-ST-seg-3d"
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02-ST-seg-3d",
+        "scales": [
+            0.202,
+            0.202,
+            1.0
+        ],
+        "n_keep_axials": 2
     },
     {
-        "dataset_name": "training/li13_T4"
+        "dataset_name": "training/li13_T4",
+        "scales": [
+            0.31,
+            0.31,
+            2.48
+        ],
+        "n_keep_axials": 3
     }
 ]

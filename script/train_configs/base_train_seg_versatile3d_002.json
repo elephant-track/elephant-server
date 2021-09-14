@@ -23,7 +23,7 @@
     "is_3d": true,
     "batch_size": 1,
     "nmodels": 1,
-    "model_name": "versatile_models/versatile3d_002.pth",
-    "log_dir": "versatile_models/versatile3d_002",
+    "model_name": "versatile_models/versatile3d_002_scales-n_keep_axials.pth",
+    "log_dir": "versatile_models/versatile3d_002_scales-n_keep_axials",
     "epoch_start": 0
 }

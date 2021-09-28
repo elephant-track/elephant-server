@@ -1,0 +1,66 @@
+[
+    {
+        "dataset_name": "check_overfitting/Fluo-N3DH-CE_01",
+        "t_min": 100,
+        "t_max": 100,
+        "device": "cuda",
+        "crop_size": [
+            384,
+            384,
+            16
+        ],
+        "scales": [
+            0.09,
+            0.09,
+            1.0
+        ],
+        "n_keep_axials": 3,
+        "lr": 5e-4,
+        "n_crops": 5,
+        "n_epochs": 500,
+        "aug_scale_factor_base": 0.5,
+        "aug_rotation_angle": 0,
+        "aug_contrast": 0.5,
+        "is_3d": true,
+        "batch_size": 1,
+        "nmodels": 1,
+        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "epoch_start": 0
+    },
+    {
+        "dataset_name": "check_overfitting/Fluo-N3DH-CE_02",
+        "t_min": 100,
+        "t_max": 100,
+        "device": "cuda",
+        "patch": [
+            544,
+            384,
+            24
+        ],
+        "crop_size": [
+            384,
+            384,
+            16
+        ],
+        "scales": [
+            0.09,
+            0.09,
+            1.0
+        ],
+        "n_keep_axials": 3,
+        "lr": 5e-4,
+        "n_crops": 5,
+        "evalinterval": 1,
+        "n_epochs": 500,
+        "aug_scale_factor_base": 0.5,
+        "aug_rotation_angle": 0,
+        "aug_contrast": 0.5,
+        "is_3d": true,
+        "batch_size": 1,
+        "nmodels": 1,
+        "model_name": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials.pth",
+        "log_dir": "check_overfitting_Fluo-N3DH-CE_aug-scale-05_aug-contrast-05_500epochs_scales-n_keep_axials",
+        "epoch_start": 0
+    }
+]

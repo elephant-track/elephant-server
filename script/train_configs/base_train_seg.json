@@ -1,0 +1,19 @@
+{
+    "device": "cuda",
+    "patch": [
+        128,
+        128
+    ],
+    "lr": 5e-4,
+    "n_crops": 1,
+    "n_epochs": 500,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0,
+    "evalinterval": 10,
+    "is_3d": false,
+    "batch_size": 1,
+    "nmodels": 1,
+    "contrast": 0
+}

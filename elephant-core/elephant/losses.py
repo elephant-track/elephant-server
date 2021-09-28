@@ -28,6 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from elephant.util.pytorch_ssim import SSIM
 from elephant.util.pytorch_ssim import SSIM3D
 from elephant.util.gaussian_smoothing import GaussianSmoothing
 
@@ -48,28 +49,34 @@ class SegmentationLoss(nn.Module):
             in the Center Dice loss calculation.
         is_oldloss: `True` if it is a loss without `True`/`False` weight
             normalization (shown in the paper), `False` otherwise (recommended).
+        is_3d: `True` if 3D.
     """
 
     def __init__(self, class_weights=None, false_weight=10., eps=1e-6,
-                 center_value=2, is_oldloss=False):
+                 center_value=2, is_oldloss=False, is_3d=True):
         super().__init__()
         self.nll = nn.NLLLoss(weight=class_weights, reduction='mean')
         self.false_weight = false_weight
         self.eps = eps
         self.center_value = center_value
         self.is_oldloss = is_oldloss
+        kernel_size = (3, 5, 5)
+        sigma = (1., 8., 8.)
+        padding = (1, 2, 2)
+        n_dims = 2 + is_3d  # 3 or 2
         self.downsample = GaussianSmoothing(channels=1,
-                                            kernel_size=(3, 5, 5),
-                                            sigma=(1., 8., 8.),
-                                            dim=3,
+                                            kernel_size=kernel_size[-n_dims:],
+                                            sigma=sigma[-n_dims:],
+                                            dim=n_dims,
                                             stride=2,
-                                            padding=(1, 2, 2))
+                                            padding=padding[-n_dims:])
         self.upsmooth = GaussianSmoothing(channels=1,
-                                          kernel_size=(3, 5, 5),
-                                          sigma=(1., 8., 8.),
-                                          dim=3,
+                                          kernel_size=kernel_size[-n_dims:],
+                                          sigma=sigma[-n_dims:],
+                                          dim=n_dims,
                                           stride=1,
-                                          padding=(1, 2, 2))
+                                          padding=padding[-n_dims:])
+        self.n_dims = n_dims
 
     def forward(self, prediction, target):
         assert prediction.shape[0] == target.shape[0]
@@ -154,7 +161,7 @@ class SegmentationLoss(nn.Module):
                             self.downsample(
                                 torch.exp(prediction[i:i+1, -1:])
                             ),
-                            size=prediction.shape[-3:],
+                            size=prediction.shape[-self.n_dims:],
                             mode='nearest',
                         )
                     )
@@ -164,9 +171,9 @@ class SegmentationLoss(nn.Module):
         self.nll_loss /= count
         self.center_loss /= count
         self.smooth_loss /= count
-        return (self.nll_loss +
-                self.center_loss * 5 +
-                self.smooth_loss * 1)
+        return (self.nll_loss * 1 / 7 +
+                self.center_loss * 5 / 7 +
+                self.smooth_loss * 1 / 7)
 
 
 class AutoencoderLoss(nn.Module):
@@ -211,57 +218,80 @@ class FlowLoss(nn.Module):
             The order is (Z, Y, X).
         is_oldloss: `True` if it is a loss without weight normalization
             (shown in the paper), `False` otherwise (recommended).
+        is_3d: `True` if 3D.
     Channel order of target:
         (flow_x, flow_y, flow_z, mask, input_t0, input_t1)
     """
 
     def __init__(self,
                  criterion=nn.L1Loss(reduction='none'),
-                 flow_norm_factor=(80, 80, 10),
-                 dim_weights=(1./3, 1./3, 1./3),
-                 is_oldloss=False):
+                 flow_norm_factor=None,
+                 dim_weights=None,
+                 is_oldloss=False,
+                 is_3d=True):
         super().__init__()
         self.criterion = criterion
-        self.ssim = SSIM3D(window_size=(3, 7, 7))
+        n_dims = 2 + is_3d  # 3 or 2
+        self.n_dims = n_dims
+        if is_3d:
+            self.ssim = SSIM3D(window_size=(3, 7, 7))
+            if flow_norm_factor is None:
+                flow_norm_factor = (80, 80, 10)
+            if dim_weights is None:
+                dim_weights = (1./3, 1./3, 1./3)
+        else:
+            self.ssim = SSIM(window_size=7)
+            if flow_norm_factor is None:
+                flow_norm_factor = (80, 80)
+            if dim_weights is None:
+                dim_weights = (1./2, 1./2)
         self.is_oldloss = is_oldloss
-        self.flow_norm_factor = flow_norm_factor  # X, Y, Z
+        self.flow_norm_factor = flow_norm_factor  # X, Y(, Z)
         if not is_oldloss:
             dim_weights = tuple(w / sum(dim_weights) for w in dim_weights)
         self.dim_weights = dim_weights
-        self.downsample = GaussianSmoothing(channels=3,
-                                            kernel_size=(3, 5, 5),
-                                            sigma=(1., 8., 8.),
-                                            dim=3,
+        kernel_size = (3, 5, 5)
+        sigma = (1., 8., 8.)
+        padding = (1, 2, 2)
+        self.downsample = GaussianSmoothing(channels=n_dims,
+                                            kernel_size=kernel_size[-n_dims:],
+                                            sigma=sigma[-n_dims:],
+                                            dim=n_dims,
                                             stride=2,
-                                            padding=(1, 2, 2))
-        self.upsmooth = GaussianSmoothing(channels=3,
-                                          kernel_size=(3, 5, 5),
-                                          sigma=(1., 8., 8.),
-                                          dim=3,
+                                            padding=padding[-n_dims:])
+        self.upsmooth = GaussianSmoothing(channels=n_dims,
+                                          kernel_size=kernel_size[-n_dims:],
+                                          sigma=sigma[-n_dims:],
+                                          dim=n_dims,
                                           stride=1,
-                                          padding=(1, 2, 2))
+                                          padding=padding[-n_dims:])
 
     def forward(self, prediction, target):
-        assert prediction.shape == target[:, :3].shape, (
-            'prediction.shape {} should be same as target[:,:3].shape {}'
-            .format(prediction.shape, target[:, :3].shape))
+        assert prediction.shape == target[:, :self.n_dims].shape, (
+            'prediction.shape {} should be same as target[:,:{:d}].shape {}'
+            .format(prediction.shape, self.n_dims,
+                    target[:, :self.n_dims].shape))
         if self.is_oldloss:
             cr_loss = self.criterion(
-                prediction, target[:, :3]) * target[:, 3:4]
+                prediction, target[:, :self.n_dims]) * target[:, -3:-2]
             self.instance_loss = sum(
                 cr_loss[:, d].mean() * self.dim_weights[d]
-                for d in range(3)
+                for d in range(self.n_dims)
             )
         else:
-            cr_loss = self.criterion(prediction, target[:, :3])
+            cr_loss = self.criterion(prediction, target[:, :self.n_dims])
             self.instance_loss = sum(
-                cr_loss[:, d][0 < target[:, 3]].mean() * self.dim_weights[d]
-                for d in range(3)
+                cr_loss[:, d][0 < target[:, -3]].mean() * self.dim_weights[d]
+                for d in range(self.n_dims)
             )
-        flow = prediction.clone().permute(0, 2, 3, 4, 1).to(prediction.device)
+        dims_order = [0, 2, 3, 1]
+        if self.n_dims == 3:
+            dims_order.insert(3, 4)
+        flow = prediction.clone().permute(*dims_order).to(prediction.device)
         flow[..., 0] *= self.flow_norm_factor[0] / (flow.shape[-2] / 2)
         flow[..., 1] *= self.flow_norm_factor[1] / (flow.shape[-3] / 2)
-        flow[..., 2] *= self.flow_norm_factor[2] / (flow.shape[-4] / 2)
+        if self.n_dims == 3:
+            flow[..., 2] *= self.flow_norm_factor[2] / (flow.shape[-4] / 2)
         grid = torch.zeros(flow.shape,
                            dtype=torch.float32
                            ).to(prediction.device)
@@ -271,19 +301,20 @@ class FlowLoss(nn.Module):
         grid[..., 1] = torch.linspace(-1, 1,
                                       flow.shape[-3]
                                       ).view(flow.shape[-3], 1)
-        grid[..., 2] = torch.linspace(-1, 1,
-                                      flow.shape[-4]
-                                      ).view(flow.shape[-4], 1, 1)
-        warp = torch.nn.functional.grid_sample(target[:, 5:6],
+        if self.n_dims == 3:
+            grid[..., 2] = torch.linspace(-1, 1,
+                                          flow.shape[-4]
+                                          ).view(flow.shape[-4], 1, 1)
+        warp = torch.nn.functional.grid_sample(target[:, -1:],
                                                grid - flow,
                                                align_corners=True)
-        self.ssim_loss = 1 - self.ssim(target[:, 4:5], warp)
+        self.ssim_loss = 1 - self.ssim(target[:, -2:-1], warp)
         self.smooth_loss = abs(
             prediction -
             self.upsmooth(
                 F.interpolate(
                     self.downsample(prediction),
-                    size=prediction.shape[-3:],
+                    size=prediction.shape[-self.n_dims:],
                     mode='nearest',
                 )
             )
@@ -296,8 +327,11 @@ class FlowLoss(nn.Module):
                 self.smooth_loss * 1e-4
             )
 
+        loss_weights = [1.0, 1e-2, 1e-2]
+        loss_weights = [w / sum(loss_weights) for w in loss_weights]
+
         return (
-            self.instance_loss +
-            self.ssim_loss * 1e-2 +
-            self.smooth_loss * 1e-2
+            self.instance_loss * loss_weights[0] +
+            self.ssim_loss * loss_weights[1] +
+            self.smooth_loss * loss_weights[2]
         )

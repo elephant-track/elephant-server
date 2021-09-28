@@ -41,6 +41,7 @@ from elephant.common import spots_with_flow
 from elephant.config import ExportConfig
 from elephant.config import FlowEvalConfigTiff
 from elephant.config import SegmentationEvalConfigTiff
+from elephant.util import get_next_multiple
 
 
 def main():
@@ -57,6 +58,8 @@ def main():
     with io.open(args.config, 'r', encoding='utf-8') as jsonfile:
         config_data = json.load(jsonfile)
     if args.command == 'detection':
+        config_data['patch'] = [int(get_next_multiple(s * 0.75, 16)) for s
+                                in skimage.io.imread(files[0]).shape[-2:]]
         config = SegmentationEvalConfigTiff(config_data)
         print(config)
         spots = []
@@ -82,6 +85,8 @@ def main():
     elif args.command == 'export':
         config_data['savedir'] = args.output
         config_data['shape'] = skimage.io.imread(files[0]).shape
+        config_data['t_start'] = 0
+        config_data['t_end'] = len(files) - 1
         config = ExportConfig(config_data)
         print(config)
         # load spots and group by t

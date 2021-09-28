@@ -1,0 +1,210 @@
+[
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-MuSC/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-MuSC/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DL-HeLa/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DL-HeLa/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/01_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/02_seg_ST",
+        "model_name": "ISBI2021/ALL/seg_ST.pth",
+        "log_dir": "ISBI2021/ALL_seg_ST",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10
+    }
+]

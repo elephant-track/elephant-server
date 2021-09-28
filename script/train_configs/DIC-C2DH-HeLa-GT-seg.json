@@ -1,0 +1,20 @@
+[
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/01_seg_GT",
+        "model_name": "ISBI2021/DIC-C2DH-HeLa-GT-seg.pth",
+        "log_dir": "ISBI2021/DIC-C2DH-HeLa-GT-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/02_seg_GT",
+        "model_name": "ISBI2021/DIC-C2DH-HeLa-GT-seg.pth",
+        "log_dir": "ISBI2021/DIC-C2DH-HeLa-GT-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    }
+]

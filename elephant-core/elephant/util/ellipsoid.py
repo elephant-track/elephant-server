@@ -92,6 +92,9 @@ def ellipsoid(center, radii, rotation, scales=None, shape=None, minarea=0):
         May be used to directl index into an array, e.g.
         ``img[dd, rr, cc] = 1``
     """
+    center = np.array(center)
+    radii = np.array(radii)
+    rotation = np.array(rotation)
     assert center.shape == (3,)
     assert radii.shape == (3,)
     assert 0 < radii.max(), "radii should contain at least one positive value"

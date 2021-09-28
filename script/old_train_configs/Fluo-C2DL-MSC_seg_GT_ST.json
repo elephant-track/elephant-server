@@ -1,0 +1,12 @@
+[
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/01_seg_GT_ST",
+        "model_name": "ISBI2021/Fluo-C2DL-MSC/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/Fluo-C2DL-MSC_seg_GT_ST"
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/02_seg_GT_ST",
+        "model_name": "ISBI2021/Fluo-C2DL-MSC/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/Fluo-C2DL-MSC_seg_GT_ST"
+    }
+]

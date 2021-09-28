@@ -1,0 +1,14 @@
+[
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/01_seg_GT_ST",
+        "model_name": "ISBI2021/BF-C2DL-HSC/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/BF-C2DL-HSC_seg_GT_ST",
+        "n_epochs": 20
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/02_seg_GT_ST",
+        "model_name": "ISBI2021/BF-C2DL-HSC/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/BF-C2DL-HSC_seg_GT_ST",
+        "n_epochs": 20
+    }
+]

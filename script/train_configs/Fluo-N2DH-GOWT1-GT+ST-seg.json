@@ -1,0 +1,20 @@
+[
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/01_seg_GT+ST",
+        "model_name": "ISBI2021/Fluo-N2DH-GOWT1-GT+ST-seg.pth",
+        "log_dir": "ISBI2021/Fluo-N2DH-GOWT1-GT+ST-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/02_seg_GT+ST",
+        "model_name": "ISBI2021/Fluo-N2DH-GOWT1-GT+ST-seg.pth",
+        "log_dir": "ISBI2021/Fluo-N2DH-GOWT1-GT+ST-seg",
+        "evalinterval": -1,
+        "train_length": 100,
+        "eval_length": 100,
+        "adaptive_length": true
+    }
+]

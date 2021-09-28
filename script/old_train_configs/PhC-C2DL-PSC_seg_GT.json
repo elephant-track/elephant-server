@@ -1,0 +1,16 @@
+[
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/01_seg_GT",
+        "model_name": "ISBI2021/PhC-C2DL-PSC/seg_GT.pth",
+        "log_dir": "ISBI2021/PhC-C2DL-PSC_seg_GT",
+        "n_crops": 10,
+        "evalinterval": -1
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/02_seg_GT",
+        "model_name": "ISBI2021/PhC-C2DL-PSC/seg_GT.pth",
+        "log_dir": "ISBI2021/PhC-C2DL-PSC_seg_GT",
+        "n_crops": 10,
+        "evalinterval": -1
+    }
+]

@@ -1,0 +1,14 @@
+[
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01_seg_GT_ST",
+        "model_name": "ISBI2021/Fluo-N3DH-CHO/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/Fluo-N3DH-CHO_seg_GT_ST",
+        "n_epochs": 100
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02_seg_GT_ST",
+        "model_name": "ISBI2021/Fluo-N3DH-CHO/seg_GT_ST.pth",
+        "log_dir": "ISBI2021/Fluo-N3DH-CHO_seg_GT_ST",
+        "n_epochs": 100
+    }
+]

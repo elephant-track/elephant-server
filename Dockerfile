@@ -22,15 +22,19 @@ RUN conda install --override-channels -c main -c conda-forge \
     h5py=2.10.0 \
     flask=1.1.2 \
     flask-redis=0.4.0 \
+    imagecodecs=2021.3.31 \
     libiconv=1.15 \
     pika=1.1.0 \
     scikit-learn=0.23.1 \
     scikit-image=0.17.2 \
     scipy=1.4.1 \
+    tensorflow=2.4.0 \
     tensorboardX=2.1 \
     tqdm=4.48.2 \
     uwsgi=2.0.18 \
     zarr=2.4.0
+
+RUN pip install nvsmi==0.4.2
 
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh

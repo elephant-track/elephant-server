@@ -1,0 +1,26 @@
+{
+    "01": [
+        "man_seg_004_000.tif",
+        "man_seg_008_001.tif",
+        "man_seg_033_001.tif",
+        "man_seg_056_000.tif",
+        "man_seg_057_001.tif",
+        "man_seg_058_000.tif",
+        "man_seg_062_001.tif",
+        "man_seg_087_001.tif",
+        "man_seg_088_000.tif"
+    ],
+    "02": [
+        "man_seg_023_001.tif",
+        "man_seg_026_002.tif",
+        "man_seg_028_000.tif",
+        "man_seg_041_001.tif",
+        "man_seg_043_000.tif",
+        "man_seg_057_000.tif",
+        "man_seg_067_000.tif",
+        "man_seg_069_001.tif",
+        "man_seg_070_000.tif",
+        "man_seg_073_000.tif",
+        "man_seg_082_001.tif"
+    ]
+}

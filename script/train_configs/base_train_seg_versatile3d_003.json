@@ -1,0 +1,29 @@
+{
+    "device": "cuda",
+    "patch": [
+        512,
+        512,
+        24
+    ],
+    "crop_size": [
+        384,
+        384,
+        16
+    ],
+    "lr": 5e-3,
+    "n_crops": 1,
+    "evalinterval": -1,
+    "train_length": 10,
+    "eval_length": 5,
+    "n_epochs": 100,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0.5,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0.5,
+    "is_3d": true,
+    "batch_size": 1,
+    "nmodels": 1,
+    "model_name": "versatile_models/versatile3d_003_scales-n_keep_axials.pth",
+    "log_dir": "versatile_models/versatile3d_003_scales-n_keep_axials",
+    "epoch_start": 0
+}

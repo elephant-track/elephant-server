@@ -1,0 +1,340 @@
+[
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-HSC/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-MuSC/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/BF-C2DL-MuSC/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/DIC-C2DH-HeLa/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C2DL-MSC/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-A549/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DH-H157/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-C3DL-MDA231/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DH-GOWT1/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DL-HeLa/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N2DL-HeLa/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CE/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/Fluo-N3DH-CHO/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DH-U373/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/01-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    },
+    {
+        "dataset_name": "ISBI2021/PhC-C2DL-PSC/02-ST-seg",
+        "model_name": "ISBI2021/versatile2d_384x384.pth",
+        "log_dir": "ISBI2021/versatile2d_384x384",
+        "evalinterval": -1,
+        "train_length": 10,
+        "eval_length": 10,
+        "n_epochs": 5000,
+        "patch": [
+            384,
+            384
+        ]
+    }
+]

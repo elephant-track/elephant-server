@@ -1,0 +1,13 @@
+FROM elephant-server:0.2.0
+
+LABEL maintainer="Ko Sugawara <ko.sugawara@ens-lyon.fr>"
+
+RUN pip install flake8 pytest
+
+COPY docker/test.sh /test.sh
+RUN chmod +x /test.sh
+
+COPY ./elephant-core /tmp/elephant-core
+WORKDIR /tmp/elephant-core
+
+CMD ["/test.sh"]

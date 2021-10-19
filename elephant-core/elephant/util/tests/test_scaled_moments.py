@@ -22,31 +22,21 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
-"""Test utility functions."""
+"""Test scaled moments function."""
 
 import numpy as np
-import torch
+from numpy.testing import assert_allclose
+from skimage import data
 
-from elephant.util import get_device
-from elephant.util import get_next_multiple
-from elephant.util import get_pad_size
-from elephant.util import normalize_zero_one
+from elephant.util.scaled_moments import scaled_moments_central
 
 
-def test_get_next_multiple():
-    assert get_next_multiple(120, 16) == 128
-
-
-def test_get_pad_size():
-    pad_size = get_pad_size(21, 16)
-    assert pad_size == (5, 6)
-
-
-def test_normalize_zero_one():
-    data = np.array(range(5)).astype(float)
-    data = normalize_zero_one(data)
-    assert data.min() == 0 and data.max() == 1
-
-
-def test_get_device():
-    assert get_device() in (torch.device("cpu"), torch.device("cuda"))
+def test_scaled_moments_central():
+    img = data.cell()
+    mu = scaled_moments_central(img, scales=(2.0, 1.0), order=2)
+    expected = np.array([
+        [2.46697460e7,   2.38418579e-7,  6.19935538e11],
+        [8.94069672e-08, 1.63203515e09,  -1.45016251e12],
+        [3.56890541e12,  -5.73021830e12, 9.06283186e16]
+    ])
+    assert_allclose(mu, expected)

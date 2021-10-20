@@ -32,6 +32,20 @@ from elephant.util.scaled_moments import scaled_centroid
 from elephant.util.scaled_moments import scaled_moments_central
 
 
+def test_np_linspace():
+    img = data.cell()
+    centroid = scaled_centroid(img, scales=(2.0, 1.0))
+    scales = (2.0, 1.0)
+    expected = {'mean': [48405.98313954717, 8403.084265729778],
+                'std': [101553.02372674456, 17625.788452893714]}
+    for (dim, dim_length), scale, in zip(enumerate(img.shape), scales):
+        delta = np.linspace(0, scale * dim_length, dim_length,
+                            endpoint=False, dtype=float) - centroid[dim]
+        powers_of_delta = delta[:, np.newaxis] ** np.arange(2 + 1)
+        assert powers_of_delta.mean() == expected['mean'][dim]
+        assert powers_of_delta.std() == expected['std'][dim]
+
+
 def test_scaled_centroid():
     img = data.cell()
     centroid = scaled_centroid(img, scales=(2.0, 1.0))

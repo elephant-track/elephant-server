@@ -28,7 +28,15 @@ import numpy as np
 from numpy.testing import assert_allclose
 from skimage import data
 
+from elephant.util.scaled_moments import scaled_centroid
 from elephant.util.scaled_moments import scaled_moments_central
+
+
+def test_scaled_centroid():
+    img = data.cell()
+    centroid = scaled_centroid(img, scales=(2.0, 1.0))
+    expected = np.array([663.687213, 274.497211])
+    assert_allclose(centroid, expected)
 
 
 def test_scaled_moments_central():

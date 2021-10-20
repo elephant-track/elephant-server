@@ -42,6 +42,6 @@ bashroot:
 	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
 
-test: build
+test:
 	$(ELEPHANT_DOCKER) build -t $(ELEPHANT_IMAGE_NAME)-test -f Dockerfile-test . && $(ELEPHANT_DOCKER) image prune -f 
 	$(ELEPHANT_DOCKER) run -it --rm $(ELEPHANT_IMAGE_NAME)-test

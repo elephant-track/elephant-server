@@ -59,6 +59,7 @@ from elephant.common import load_seg_models
 from elephant.common import spots_with_flow
 from elephant.common import train
 from elephant.config import DATASETS_DIR
+from elephant.config import BaseConfig
 from elephant.config import ExportConfig
 from elephant.config import FlowEvalConfig
 from elephant.config import FlowTrainConfig
@@ -898,7 +899,7 @@ def gen_datset():
     p_dataset = Path(DATASETS_DIR) / req_json['dataset_name']
     h5_files = list(sorted(p_dataset.glob('*.h5')))
     if len(h5_files) == 0:
-        logger().info(".h5 file not found", "@/dataset/generate")
+        logger().info(f'.h5 file not found @{request.path}')
         return jsonify(
             message=f'.h5 file not found in {req_json["dataset_name"]}'), 204
     elif 1 < len(h5_files):
@@ -975,6 +976,29 @@ def upload():
                 dest_file.write(f.read())
             Path(tmpfile_path).unlink()
     return make_response('', 200)
+
+
+@app.route('/model/download', methods=['POST'])
+def download_model():
+    """ Download a model paramter file.
+    """
+    if request.headers['Content-Type'] != 'application/json':
+        return jsonify(error='Content-Type should be application/json'), 400
+    req_json = request.get_json()
+    config = BaseConfig(req_json)
+    logger().info(config)
+    if not Path(config.model_path).exists():
+        logger().info(
+            f'model file {config.model_path} not found @{request.path}')
+        return jsonify(
+            message=f'model file {config.model_path} not found'), 204
+    try:
+        resp = send_file(config.model_path)
+    except Exception as e:
+        logger().exception(
+            'Failed to prepare a model parameter file for download')
+        return jsonify(error=f'Exception: {e}'), 500
+    return resp
 
 
 if __name__ == "__main__":

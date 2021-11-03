@@ -131,7 +131,8 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
                 ssim_loss_avg += loss_fn.ssim_loss.item()
                 smooth_loss_avg += loss_fn.smooth_loss.item()
             # log to console
-            if batch_id % log_interval == 0:
+            if (batch_id % log_interval == (log_interval - 1) or
+                    batch_id == (len(loader) - 1)):
                 loss_avg /= count
                 if isinstance(loss_fn, SegmentationLoss):
                     nll_loss_avg /= count
@@ -144,9 +145,9 @@ def train(model, device, loader, optimizer, loss_fn, epoch,
                 msg = (
                     'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch,
-                        batch_id * len(x),
+                        (batch_id + 1) * loader.batch_size,
                         len(loader.dataset),
-                        100. * batch_id / len(loader),
+                        100. * (batch_id + 1) / len(loader),
                         loss_avg
                     )
                 )

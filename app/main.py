@@ -90,8 +90,11 @@ redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
 redis_client.set(REDIS_KEY_COUNT, 0)
 
 
-# https: // stackoverflow.com/a/32132035
 class FileRemover(object):
+    '''
+    https: // stackoverflow.com/a/32132035
+    '''
+
     def __init__(self):
         self.weak_references = dict()  # weak_ref -> filepath to remove
 
@@ -143,6 +146,21 @@ def device():
     if 'device' not in g:
         g.device = get_device()
     return g.device
+
+
+@app.before_request
+def log_before_request():
+    if request.endpoint != 'get_gpus':
+        logger().info(f'START {request.method} {request.path}')
+
+
+@app.after_request
+def log_after_request(response):
+    if request.endpoint != 'get_gpus':
+        logger().info(
+            f'DONE {request.method} {request.path} => [{response.status}]'
+        )
+    return response
 
 
 @app.route('/state', methods=['GET', 'POST'])
@@ -224,7 +242,7 @@ def update_flow_labels():
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/update/flow")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -376,7 +394,7 @@ def predict_flow():
     if 0 < config.timepoint:
         state = int(redis_client.get(REDIS_KEY_STATE))
         while (state == TrainState.WAIT.value):
-            logger().info("waiting", "@/predict/flow")
+            logger().info(f'waiting @{request.path}')
             time.sleep(1)
             state = int(redis_client.get(REDIS_KEY_STATE))
             if (state == TrainState.IDLE.value):
@@ -559,7 +577,7 @@ def update_seg_labels():
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/update/seg")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -735,7 +753,7 @@ def predict_seg():
     logger().info(config)
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/predict/seg")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -813,7 +831,7 @@ def export_ctc():
 
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/export/ctc")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -880,6 +898,7 @@ def gen_datset():
     p_dataset = Path(DATASETS_DIR) / req_json['dataset_name']
     h5_files = list(sorted(p_dataset.glob('*.h5')))
     if len(h5_files) == 0:
+        logger().info(".h5 file not found", "@/dataset/generate")
         return jsonify(
             message=f'.h5 file not found in {req_json["dataset_name"]}'), 204
     elif 1 < len(h5_files):

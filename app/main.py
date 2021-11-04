@@ -26,6 +26,7 @@
 
 import collections
 import gc
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -420,9 +421,23 @@ def predict_flow():
 
 @app.route('/reset/flow', methods=['POST'])
 def reset_flow_models():
-    if request.headers['Content-Type'] != 'application/json':
-        return jsonify(error='Content-Type should be application/json'), 400
-    req_json = request.get_json()
+    if all(ctype not in request.headers['Content-Type'] for ctype
+           in ('multipart/form-data', 'application/json')):
+        return (jsonify(error='Content-Type should be multipart/form-data' +
+                        ' or application/json'), 400)
+    if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        return jsonify(error='Process is running'), 500
+    if 'multipart/form-data' in request.headers['Content-Type']:
+        print(request.form)
+        req_json = json.loads(request.form.get('data'))
+        file = request.files['file']
+        checkpoint = torch.load(file.stream)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        req_json['url'] = None
+    else:
+        req_json = request.get_json()
+        state_dicts = None
     req_json['device'] = device()
     config = ResetConfig(req_json)
     logger().info(config)
@@ -430,7 +445,8 @@ def reset_flow_models():
         init_flow_models(config.model_path,
                          config.device,
                          config.is_3d,
-                         url=config.url)
+                         url=config.url,
+                         state_dicts=state_dicts)
     except RuntimeError as e:
         logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -783,11 +799,23 @@ def predict_seg():
 
 @app.route('/reset/seg', methods=['POST'])
 def reset_seg_models():
-    if request.headers['Content-Type'] != 'application/json':
-        return jsonify(error='Content-Type should be application/json'), 400
+    if all(ctype not in request.headers['Content-Type'] for ctype
+           in ('multipart/form-data', 'application/json')):
+        return (jsonify(error='Content-Type should be multipart/form-data' +
+                        ' or application/json'), 400)
     if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
         return jsonify(error='Process is running'), 500
-    req_json = request.get_json()
+    if 'multipart/form-data' in request.headers['Content-Type']:
+        print(request.form)
+        req_json = json.loads(request.form.get('data'))
+        file = request.files['file']
+        checkpoint = torch.load(file.stream)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        req_json['url'] = None
+    else:
+        req_json = request.get_json()
+        state_dicts = None
     req_json['device'] = device()
     config = ResetConfig(req_json)
     logger().info(config)
@@ -802,7 +830,8 @@ def reset_seg_models():
                         config.crop_size,
                         config.scales,
                         redis_client=redis_client,
-                        url=config.url)
+                        url=config.url,
+                        state_dicts=state_dicts)
     except RuntimeError as e:
         logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500

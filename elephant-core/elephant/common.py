@@ -771,24 +771,23 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                     n_crops=0, zpath_input=None, crop_size=None, scales=None,
-                    redis_client=None, url='Versatile'):
-    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    if url == 'Versatile':
-        url = f'{MODEL_URL_ROOT}versatile{2+is_3d}d.pth'
-    if url is not None:
-        logger().info(f'Loading a pretrained model: {url}')
-        checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
-        state_dicts = checkpoint if isinstance(
-            checkpoint, list) else [checkpoint]
-        torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
-                   model_path)
-    else:
-        models = [UNet.three_class_segmentation(
-            device=device,
-            is_3d=is_3d,
-        ) for i in range(n_models)]
-        n_dims = 2 + is_3d  # 3 or 2
-        input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+                    redis_client=None, url='Versatile', state_dicts=None):
+    if state_dicts is None:
+        state_dicts = [None, ] * n_models
+        if url == 'Versatile':
+            url = f'{MODEL_URL_ROOT}versatile{2+is_3d}d.pth'
+        if url is not None:
+            logger().info(f'Loading a pretrained model: {url}')
+            checkpoint = torch.hub.load_state_dict_from_url(
+                url, progress=False)
+            state_dicts = checkpoint if isinstance(
+                checkpoint, list) else [checkpoint]
+    models = [UNet.three_class_segmentation(
+        device=device,
+        is_3d=is_3d,
+        state_dict=state_dicts[i],
+    ) for i in range(n_models)]
+    if all(state_dict is None for state_dict in state_dicts):
         if 0 < n_crops:
             errors = []
             if zpath_input is None:
@@ -799,6 +798,8 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                 for error in errors:
                     logger().error(error)
             else:
+                n_dims = 2 + is_3d  # 3 or 2
+                input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
                 try:
                     if redis_client is not None:
                         redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
@@ -831,29 +832,38 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                         redis_client.set(REDIS_KEY_COUNT, 0)
                         redis_client.set(
                             REDIS_KEY_STATE, TrainState.IDLE.value)
-        torch.save(models[0].state_dict() if len(models) == 1 else [
-            model.state_dict() for model in models], model_path)
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(models[0].state_dict() if len(models) == 1 else
+               [model.state_dict() for model in models], model_path)
 
 
 def init_flow_models(model_path, device, is_3d=True, n_models=1,
-                     url='Versatile'):
+                     url='Versatile', state_dicts=None):
+    if state_dicts is None:
+        state_dicts = [None, ] * n_models
+        if url == 'Versatile':
+            if is_3d:
+                url = f'{MODEL_URL_ROOT}Fluo-N3DH-CE_flow.pth'
+            else:
+                logger().info(
+                    'The 2D versatile model is not available, ' +
+                    'initialize a model with random parameters.'
+                )
+                url = None
+        if url is not None:
+            logger().info(f'Loading a pretrained model: {url}')
+            checkpoint = torch.hub.load_state_dict_from_url(
+                url, progress=False)
+            state_dicts = checkpoint if isinstance(
+                checkpoint, list) else [checkpoint]
+    models = [FlowResNet.three_dimensional_flow(
+        device=device,
+        is_3d=is_3d,
+        state_dict=state_dicts[i],
+    ) for i in range(n_models)]
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    if url == 'Versatile':
-        url = f'{MODEL_URL_ROOT}Fluo-N3DH-CE_flow.pth'
-    if url is not None:
-        logger().info(f'Loading a pretrained model: {url}')
-        checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
-        state_dicts = checkpoint if isinstance(
-            checkpoint, list) else [checkpoint]
-        torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,
-                   model_path)
-    else:
-        models = [FlowResNet.three_dimensional_flow(
-            device=device,
-            is_3d=is_3d,
-        ) for i in range(n_models)]
-        torch.save(models[0].state_dict() if len(models) == 1 else [
-            model.state_dict() for model in models], model_path)
+    torch.save(models[0].state_dict() if len(models) == 1 else
+               [model.state_dict() for model in models], model_path)
 
 
 def load_seg_models(model_path, keep_axials, device, is_eval=False,

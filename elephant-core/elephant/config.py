@@ -89,6 +89,8 @@ class BaseConfig():
             self.zpath_input = os.path.join(DATASETS_DIR,
                                             self.dataset_name,
                                             ZARR_INPUT)
+        else:
+            self.zpath_input = None
 
     def __str__(self):
         result = []

@@ -27,7 +27,6 @@
 import json
 from pathlib import Path
 import re
-import traceback
 
 import h5py
 import numpy as np

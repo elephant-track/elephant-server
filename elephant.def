@@ -5,7 +5,8 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
     ./docker /docker
     ./script /opt/elephant/script
     ./app /app
-    ./elephant-core /elephant-core
+    ./elephant-core /tmp/elephant-core
+    ./environment.yml /tmp/environment.yml
 
 %environment
     export UWSGI_UID=$(id -u)
@@ -27,23 +28,13 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-    # Install conda modules
-    conda install --override-channels -c main -c conda-forge \
-    h5py=2.10.0 \
-    flask=1.1.2 \
-    flask-redis=0.4.0 \
-    libiconv=1.15 \
-    pika=1.1.0 \
-    scikit-learn=0.23.1 \
-    scikit-image=0.17.2 \
-    scipy=1.4.1 \
-    tensorflow=2.4.0 \
-    tensorboardX=2.1 \
-    tqdm=4.48.2 \
-    uwsgi=2.0.18 \
-    zarr=2.4.0
-
-    pip install nvsmi==0.4.2
+    # Install Python modules
+    sed -i 's/.\/elephant-core/\/tmp\/elephant-core/g' /tmp/environment.yml \
+    && conda install -c conda-forge -y mamba \
+    && mamba env update -f /tmp/environment.yml \
+    && mamba clean -qafy \
+    && rm -rf /tmp/elephant-core \
+    && rm /tmp/environment.yml
 
     # Install and set up RabbbitMQ
     chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh
@@ -75,9 +66,6 @@ From: pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
     # Copy start.sh script that will check for a /app/prestart.sh script and run it before starting the app
     cp /docker/start.sh /start.sh
     chmod +x /start.sh
-
-    # Install elephant core
-    pip install -U /elephant-core && rm -rf /elephant-core
 
     # Clean up
     rm -r /docker

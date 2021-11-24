@@ -762,7 +762,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
             compress=6,
         )
     if is_zip:
-        zip_path = shutil.make_archive('/tmp/archive.zip', 'zip', savedir)
+        zip_path = shutil.make_archive('/tmp/archive', 'zip', savedir)
         shutil.rmtree(savedir)
         return zip_path
     return True

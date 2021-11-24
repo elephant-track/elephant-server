@@ -776,7 +776,9 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
         url = f'{MODEL_URL_ROOT}versatile{2+is_3d}d.pth'
     if url is not None:
         logger().info(f'Loading a pretrained model: {url}')
-        checkpoint = torch.hub.load_state_dict_from_url(url, progress=False)
+        checkpoint = torch.hub.load_state_dict_from_url(url,
+                                                        map_location=device,
+                                                        progress=False)
         state_dicts = checkpoint if isinstance(
             checkpoint, list) else [checkpoint]
         torch.save(state_dicts[0] if len(state_dicts) == 1 else state_dicts,

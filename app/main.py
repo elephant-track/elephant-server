@@ -843,28 +843,25 @@ def export_ctc():
 
 @app.route('/gpus', methods=['GET'])
 def get_gpus():
+    gpus = []
     try:
-        if (nvsmi.is_nvidia_smi_on_path() is None
-                or nvsmi.get_gpus() == 0):
-            resp = jsonify([{
-                'id': 'GPU is not available',
-                'name': 'CPU is used',
-                'mem_total': psutil.virtual_memory().total,
-                'mem_used': psutil.virtual_memory().used
-            }])
-        else:
-            gpus = []
-            for gpu in nvsmi.get_gpus():
-                gpus.append({
-                    'id': gpu.id,
-                    'name': gpu.name,
-                    'mem_total': gpu.mem_total,
-                    'mem_used': gpu.mem_used
-                })
-            resp = jsonify(gpus)
-    except Exception as e:
-        logger().exception('Failed in checking gpus')
-        return jsonify(error=f'Exception: {e}'), 500
+        for gpu in nvsmi.get_gpus():
+            gpus.append({
+                'id': gpu.id,
+                'name': gpu.name,
+                'mem_total': gpu.mem_total,
+                'mem_used': gpu.mem_used
+            })
+        resp = jsonify(gpus)
+    except Exception:
+        pass
+    if len(gpus) == 0:
+        resp = jsonify([{
+            'id': 'GPU is not available',
+            'name': 'CPU is used',
+            'mem_total': psutil.virtual_memory().total / 1024 / 1024,
+            'mem_used': psutil.virtual_memory().used / 1024 / 1024
+        }])
     return resp
 
 

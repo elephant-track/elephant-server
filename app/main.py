@@ -823,7 +823,7 @@ def export_ctc():
         result = export_ctc_labels(config, spots_dict, redis_client)
         if isinstance(result, str):
             resp = send_file(result)
-            file_remover.cleanup_once_done(resp, result)
+            # file_remover.cleanup_once_done(resp, result)
         elif not result:
             resp = make_response('', 204)
         else:

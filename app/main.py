@@ -26,6 +26,7 @@
 
 import collections
 import gc
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -41,6 +42,7 @@ from flask_redis import FlaskRedis
 import numpy as np
 import nvsmi
 import pika
+import psutil
 from tensorflow.data import TFRecordDataset
 from tensorflow.core.util import event_pb2
 import time
@@ -59,6 +61,7 @@ from elephant.common import load_seg_models
 from elephant.common import spots_with_flow
 from elephant.common import train
 from elephant.config import DATASETS_DIR
+from elephant.config import BaseConfig
 from elephant.config import ExportConfig
 from elephant.config import FlowEvalConfig
 from elephant.config import FlowTrainConfig
@@ -90,8 +93,11 @@ redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
 redis_client.set(REDIS_KEY_COUNT, 0)
 
 
-# https: // stackoverflow.com/a/32132035
 class FileRemover(object):
+    '''
+    https: // stackoverflow.com/a/32132035
+    '''
+
     def __init__(self):
         self.weak_references = dict()  # weak_ref -> filepath to remove
 
@@ -143,6 +149,21 @@ def device():
     if 'device' not in g:
         g.device = get_device()
     return g.device
+
+
+@app.before_request
+def log_before_request():
+    if request.endpoint != 'get_gpus':
+        logger().info(f'START {request.method} {request.path}')
+
+
+@app.after_request
+def log_after_request(response):
+    if request.endpoint != 'get_gpus':
+        logger().info(
+            f'DONE {request.method} {request.path} => [{response.status}]'
+        )
+    return response
 
 
 @app.route('/state', methods=['GET', 'POST'])
@@ -224,7 +245,7 @@ def update_flow_labels():
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/update/flow")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -376,7 +397,7 @@ def predict_flow():
     if 0 < config.timepoint:
         state = int(redis_client.get(REDIS_KEY_STATE))
         while (state == TrainState.WAIT.value):
-            logger().info("waiting", "@/predict/flow")
+            logger().info(f'waiting @{request.path}')
             time.sleep(1)
             state = int(redis_client.get(REDIS_KEY_STATE))
             if (state == TrainState.IDLE.value):
@@ -401,9 +422,23 @@ def predict_flow():
 
 @app.route('/reset/flow', methods=['POST'])
 def reset_flow_models():
-    if request.headers['Content-Type'] != 'application/json':
-        return jsonify(error='Content-Type should be application/json'), 400
-    req_json = request.get_json()
+    if all(ctype not in request.headers['Content-Type'] for ctype
+           in ('multipart/form-data', 'application/json')):
+        return (jsonify(error='Content-Type should be multipart/form-data' +
+                        ' or application/json'), 400)
+    if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        return jsonify(error='Process is running'), 500
+    if 'multipart/form-data' in request.headers['Content-Type']:
+        print(request.form)
+        req_json = json.loads(request.form.get('data'))
+        file = request.files['file']
+        checkpoint = torch.load(file.stream)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        req_json['url'] = None
+    else:
+        req_json = request.get_json()
+        state_dicts = None
     req_json['device'] = device()
     config = ResetConfig(req_json)
     logger().info(config)
@@ -411,7 +446,8 @@ def reset_flow_models():
         init_flow_models(config.model_path,
                          config.device,
                          config.is_3d,
-                         url=config.url)
+                         url=config.url,
+                         state_dicts=state_dicts)
     except RuntimeError as e:
         logger().exception('Failed in init_flow_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -559,7 +595,7 @@ def update_seg_labels():
         return jsonify(error='Content-Type should be application/json'), 400
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/update/seg")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -735,7 +771,7 @@ def predict_seg():
     logger().info(config)
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/predict/seg")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -764,11 +800,23 @@ def predict_seg():
 
 @app.route('/reset/seg', methods=['POST'])
 def reset_seg_models():
-    if request.headers['Content-Type'] != 'application/json':
-        return jsonify(error='Content-Type should be application/json'), 400
+    if all(ctype not in request.headers['Content-Type'] for ctype
+           in ('multipart/form-data', 'application/json')):
+        return (jsonify(error='Content-Type should be multipart/form-data' +
+                        ' or application/json'), 400)
     if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
         return jsonify(error='Process is running'), 500
-    req_json = request.get_json()
+    if 'multipart/form-data' in request.headers['Content-Type']:
+        print(request.form)
+        req_json = json.loads(request.form.get('data'))
+        file = request.files['file']
+        checkpoint = torch.load(file.stream)
+        state_dicts = checkpoint if isinstance(
+            checkpoint, list) else [checkpoint]
+        req_json['url'] = None
+    else:
+        req_json = request.get_json()
+        state_dicts = None
     req_json['device'] = device()
     config = ResetConfig(req_json)
     logger().info(config)
@@ -783,7 +831,8 @@ def reset_seg_models():
                         config.crop_size,
                         config.scales,
                         redis_client=redis_client,
-                        url=config.url)
+                        url=config.url,
+                        state_dicts=state_dicts)
     except RuntimeError as e:
         logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -813,7 +862,7 @@ def export_ctc():
 
     state = int(redis_client.get(REDIS_KEY_STATE))
     while (state == TrainState.WAIT.value):
-        logger().info("waiting", "@/export/ctc")
+        logger().info(f'waiting @{request.path}')
         time.sleep(1)
         state = int(redis_client.get(REDIS_KEY_STATE))
         if (state == TrainState.IDLE.value):
@@ -823,7 +872,7 @@ def export_ctc():
         result = export_ctc_labels(config, spots_dict, redis_client)
         if isinstance(result, str):
             resp = send_file(result)
-            file_remover.cleanup_once_done(resp, result)
+            # file_remover.cleanup_once_done(resp, result)
         elif not result:
             resp = make_response('', 204)
         else:
@@ -843,14 +892,24 @@ def export_ctc():
 @app.route('/gpus', methods=['GET'])
 def get_gpus():
     gpus = []
-    for gpu in nvsmi.get_gpus():
-        gpus.append({
-            'id': gpu.id,
-            'name': gpu.name,
-            'mem_total': gpu.mem_total,
-            'mem_used': gpu.mem_used
-        })
-    resp = jsonify(gpus)
+    try:
+        for gpu in nvsmi.get_gpus():
+            gpus.append({
+                'id': gpu.id,
+                'name': gpu.name,
+                'mem_total': gpu.mem_total,
+                'mem_used': gpu.mem_used
+            })
+        resp = jsonify(gpus)
+    except Exception:
+        pass
+    if len(gpus) == 0:
+        resp = jsonify([{
+            'id': 'GPU is not available',
+            'name': 'CPU is used',
+            'mem_total': psutil.virtual_memory().total / 1024 / 1024,
+            'mem_used': psutil.virtual_memory().used / 1024 / 1024
+        }])
     return resp
 
 
@@ -880,6 +939,7 @@ def gen_datset():
     p_dataset = Path(DATASETS_DIR) / req_json['dataset_name']
     h5_files = list(sorted(p_dataset.glob('*.h5')))
     if len(h5_files) == 0:
+        logger().info(f'.h5 file not found @{request.path}')
         return jsonify(
             message=f'.h5 file not found in {req_json["dataset_name"]}'), 204
     elif 1 < len(h5_files):
@@ -956,6 +1016,29 @@ def upload():
                 dest_file.write(f.read())
             Path(tmpfile_path).unlink()
     return make_response('', 200)
+
+
+@app.route('/model/download', methods=['POST'])
+def download_model():
+    """ Download a model paramter file.
+    """
+    if request.headers['Content-Type'] != 'application/json':
+        return jsonify(error='Content-Type should be application/json'), 400
+    req_json = request.get_json()
+    config = BaseConfig(req_json)
+    logger().info(config)
+    if not Path(config.model_path).exists():
+        logger().info(
+            f'model file {config.model_path} not found @{request.path}')
+        return jsonify(
+            message=f'model file {config.model_path} not found'), 204
+    try:
+        resp = send_file(config.model_path)
+    except Exception as e:
+        logger().exception(
+            'Failed to prepare a model parameter file for download')
+        return jsonify(error=f'Exception: {e}'), 500
+    return resp
 
 
 if __name__ == "__main__":

@@ -17,24 +17,16 @@ RUN set -x \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install conda modules
-RUN conda install --override-channels -c main -c conda-forge \
-    h5py=2.10.0 \
-    flask=1.1.2 \
-    flask-redis=0.4.0 \
-    imagecodecs=2021.3.31 \
-    libiconv=1.15 \
-    pika=1.1.0 \
-    scikit-learn=0.23.1 \
-    scikit-image=0.17.2 \
-    scipy=1.4.1 \
-    tensorflow=2.4.0 \
-    tensorboardX=2.1 \
-    tqdm=4.48.2 \
-    uwsgi=2.0.18 \
-    zarr=2.4.0
-
-RUN pip install nvsmi==0.4.2
+# Install Python modules
+COPY ./elephant-core /tmp/elephant-core
+COPY ./environment.yml /tmp/environment.yml
+RUN sed -i 's/.\/elephant-core/\/tmp\/elephant-core/g' /tmp/environment.yml \
+    && conda install -c conda-forge -y mamba \
+    && mamba clean -qafy \
+    && mamba env update -f /tmp/environment.yml \
+    && mamba clean -qafy \
+    && rm -rf /tmp/elephant-core \
+    && rm /tmp/environment.yml
 
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
@@ -73,10 +65,6 @@ COPY ./script /opt/elephant/script
 # Add Flask app
 COPY ./app /app
 WORKDIR /app
-
-# Install elephant core
-COPY ./elephant-core /tmp/elephant-core
-RUN pip install -U /tmp/elephant-core && rm -rf /tmp/elephant-core
 
 # Copy the entrypoint
 COPY docker/entrypoint.sh /entrypoint.sh

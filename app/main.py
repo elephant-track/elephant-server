@@ -42,6 +42,7 @@ from flask_redis import FlaskRedis
 import numpy as np
 import nvsmi
 import pika
+import psutil
 from tensorflow.data import TFRecordDataset
 from tensorflow.core.util import event_pb2
 import time
@@ -871,7 +872,7 @@ def export_ctc():
         result = export_ctc_labels(config, spots_dict, redis_client)
         if isinstance(result, str):
             resp = send_file(result)
-            file_remover.cleanup_once_done(resp, result)
+            # file_remover.cleanup_once_done(resp, result)
         elif not result:
             resp = make_response('', 204)
         else:
@@ -891,14 +892,24 @@ def export_ctc():
 @app.route('/gpus', methods=['GET'])
 def get_gpus():
     gpus = []
-    for gpu in nvsmi.get_gpus():
-        gpus.append({
-            'id': gpu.id,
-            'name': gpu.name,
-            'mem_total': gpu.mem_total,
-            'mem_used': gpu.mem_used
-        })
-    resp = jsonify(gpus)
+    try:
+        for gpu in nvsmi.get_gpus():
+            gpus.append({
+                'id': gpu.id,
+                'name': gpu.name,
+                'mem_total': gpu.mem_total,
+                'mem_used': gpu.mem_used
+            })
+        resp = jsonify(gpus)
+    except Exception:
+        pass
+    if len(gpus) == 0:
+        resp = jsonify([{
+            'id': 'GPU is not available',
+            'name': 'CPU is used',
+            'mem_total': psutil.virtual_memory().total / 1024 / 1024,
+            'mem_used': psutil.virtual_memory().used / 1024 / 1024
+        }])
     return resp
 
 

@@ -805,6 +805,7 @@ def reset_seg_models():
         return (jsonify(error='Content-Type should be multipart/form-data' +
                         ' or application/json'), 400)
     if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
+        logger().exception('Process is running. Model cannot be reset.')
         return jsonify(error='Process is running'), 500
     if 'multipart/form-data' in request.headers['Content-Type']:
         print(request.form)

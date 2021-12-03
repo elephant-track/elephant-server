@@ -8,7 +8,7 @@ NVIDIA_GID=${NVIDIA_GID:-0}
 echo "Starting with UID : $USER_ID, GID: $GROUP_ID, NVIDIA GID: ${NVIDIA_GID:-0}"
 useradd -u $USER_ID -o -m user
 if [ $GROUP_ID -ne 0 ]; then
-  groupmod -g $GROUP_ID user
+  groupmod -o -g $GROUP_ID user
 fi
 if [ $NVIDIA_GID -ne 0 ]; then
   groupadd -g $NVIDIA_GID nvidia

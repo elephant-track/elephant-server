@@ -37,4 +37,4 @@ def test_scaled_moments_central():
     expected = np.array([[16.,   0.,  20.],
                          [0.,   0.,   0.],
                          [80.,   0., 100.]])
-    assert_allclose(mu, expected)
+    assert_allclose(mu, expected, rtol=1e-05, atol=1e-08)

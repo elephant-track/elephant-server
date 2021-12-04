@@ -171,7 +171,7 @@ def test_three_class_segmentation():
              [-0.83362025, -1.6382282,  -2.5767176,  -0.9678207,  -1.7188845],
              [-0.91411495, -1.222617,   -2.769664,   -4.5017776,  -0.85926974]]
         ]]])
-    assert torch.allclose(y, expected)
+    assert torch.allclose(y, expected, rtol=1e-4)
 
 
 def test_three_dimensional_flow():
@@ -337,4 +337,4 @@ def test_three_dimensional_flow():
              [-0.44132188, -0.87742317, -0.79334104, -0.7186437,  -0.64516896],
              [-0.42390147, -0.54549336, -0.7307426,  -0.66375196, -0.2771961]]
         ]]])
-    assert torch.allclose(y, expected)
+    assert torch.allclose(y, expected, rtol=1e-4)

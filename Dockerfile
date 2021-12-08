@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:1.4-cuda10.1-cudnn7-runtime
+FROM pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
 # Modified from https://github.com/tiangolo/uwsgi-nginx-flask-docker (Apache license)
 
 LABEL maintainer="Ko Sugawara <ko.sugawara@ens-lyon.fr>"

@@ -38,7 +38,7 @@ def test_gaussian_smoothing_1d():
     expected = np.array(
         [0.68083227, 1., 1., 1., 0.68083227]).astype(np.float32)
     print(test)
-    assert_allclose(test, expected)
+    assert_allclose(test, expected, rtol=1e-05, atol=1e-08)
 
 
 def test_gaussian_smoothing_2d():
@@ -52,7 +52,7 @@ def test_gaussian_smoothing_2d():
         [0.6808322,        1.,        1.,        1., 0.6808322],
         [0.4635325, 0.6808322, 0.6808322, 0.6808322, 0.4635325],
     ]).astype(np.float32)
-    assert_allclose(test, expected)
+    assert_allclose(test, expected, rtol=1e-05, atol=1e-08)
 
 
 def test_gaussian_smoothing_3d():
@@ -98,4 +98,4 @@ def test_gaussian_smoothing_3d():
     ]
     ).astype(np.float32)
     print(test)
-    assert_allclose(test, expected, rtol=1e-6)
+    assert_allclose(test, expected, rtol=1e-05, atol=1e-08)

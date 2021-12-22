@@ -18,9 +18,8 @@ RUN set -x \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python modules
-COPY ./elephant-core /tmp/elephant-core
 COPY ./environment.yml /tmp/environment.yml
-RUN sed -i 's/.\/elephant-core/\/tmp\/elephant-core/g' /tmp/environment.yml \
+RUN sed -i '/.\/elephant-core/d' /tmp/environment.yml \
     && conda install -c conda-forge -y mamba \
     && mamba clean -qafy \
     && mamba env update -f /tmp/environment.yml \
@@ -70,6 +69,9 @@ WORKDIR /app
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
+
+COPY ./elephant-core /tmp/elephant-core
+RUN pip install -U /tmp/elephant-core && rm -rf /tmp/elephant-core
 
 # Run the start script provided by the parent image tiangolo/uwsgi-nginx.
 # It will check for an /app/prestart.sh script (e.g. for migrations)

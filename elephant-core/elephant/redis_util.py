@@ -31,6 +31,8 @@ REDIS_KEY_LR = 'lr'
 REDIS_KEY_NCROPS = 'n_crops'
 REDIS_KEY_STATE = 'state'
 REDIS_KEY_TIMEPOINT = 'timepoint'
+REDIS_KEY_UPDATE_ONGOING_SEG = 'update_ongoing_seg'
+REDIS_KEY_UPDATE_ONGOING_FLOW = 'update_ongoing_flow'
 
 
 class TrainState(Enum):

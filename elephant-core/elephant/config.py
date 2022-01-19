@@ -29,6 +29,10 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 
+import torch
+
+from elephant.util import get_device
+
 DATASETS_DIR = '/workspace/datasets'
 MODELS_DIR = '/workspace/models'
 LOGS_DIR = '/workspace/logs'
@@ -60,7 +64,10 @@ class BaseConfig():
         if config.get('model_name') is not None:
             self.model_path = os.path.join(
                 MODELS_DIR, config.get('model_name'))
-        self.device = config.get('device')
+        self.device = config.get('device', get_device())
+        if not torch.cuda.is_available():
+            self.device = torch.device("cpu")
+        self.is_mixed_precision = config.get('is_mixed_precision', True)
         self.debug = config.get('debug', False)
         self.output_prediction = config.get('output_prediction', False)
         self.is_3d = config.get('is_3d', True)
@@ -91,6 +98,9 @@ class BaseConfig():
                                             ZARR_INPUT)
         else:
             self.zpath_input = None
+
+    def is_cpu(self):
+        return self.device == 'cpu' or self.device == torch.device('cpu')
 
     def __str__(self):
         result = []

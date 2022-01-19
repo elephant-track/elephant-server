@@ -172,8 +172,10 @@ class UNet(nn.Module):
                 True)
 
     def forward(self, input, keep_axials):
+        n_batches = input.shape[0]
         if self.is_3d:
-            base_size = (2**keep_axials.count(False), 16, 16)
+            z_poolings = max([int(len(ka) - ka.sum()) for ka in keep_axials])
+            base_size = (2**z_poolings, 16, 16)
         else:
             base_size = (16, 16)
         # pad if specified
@@ -189,7 +191,10 @@ class UNet(nn.Module):
             x = self.encoder[level](x)
             encoder_out.append(x)
             # the pooling layers; we use 2x2 MaxPooling
-            x = self._pooler(keep_axials[level])(x)
+            x = torch.cat([
+                self._pooler(keep_axials[n, level])(x[n:n+1])
+                for n in range(n_batches)
+            ])
 
         # apply base
         x = self.base(x)
@@ -198,7 +203,10 @@ class UNet(nn.Module):
         encoder_out = encoder_out[::-1]
         for level in range(self.depth):
             # the upsampling layers
-            x = self._upsampler(keep_axials[::-1][level])(x)
+            x = torch.cat([
+                self._upsampler(keep_axials[n, -(1 + level)])(x[n:n+1])
+                for n in range(n_batches)
+            ])
             x = self.decoder[level](torch.cat((encoder_out[level], x), dim=1))
 
         # apply output conv and activation (if given)

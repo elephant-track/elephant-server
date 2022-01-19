@@ -39,6 +39,7 @@ if os.environ.get('CTC') != '1':
     import zarr
 
 from elephant.util import normalize_zero_one
+from elephant.logging import logger
 from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
@@ -100,16 +101,17 @@ class SegmentationDatasetZarr(du.Dataset):
         self.rotation_angle = rotation_angle
         self.contrast = contrast
         self.is_eval = is_eval
-        self.length = length
-        self.keep_axials = keep_axials
+        if self.is_livemode:
+            self.length = int(self.redis_c.get(REDIS_KEY_NCROPS))
+        else:
+            self.length = length
+        self.keep_axials = torch.tensor(keep_axials)
 
     def __len__(self):
         if self.length is not None:
             return self.length
         if self.is_ae:
             return self.n_crops
-        if self.is_livemode:
-            return int(self.redis_c.get(REDIS_KEY_NCROPS))
         return len(self.indices) * self.n_crops
 
     def _is_valid(self, input):
@@ -131,15 +133,19 @@ class SegmentationDatasetZarr(du.Dataset):
             za_label = zarr.open(self.zpath_seg_label, mode='r')
             if self.is_livemode:
                 while True:
-                    v = self.redis_c.blpop(REDIS_KEY_TIMEPOINT, 1)
+                    v = self.redis_c.get(REDIS_KEY_TIMEPOINT)
                     if v is not None:
-                        i_frame = int(v[1])
+                        i_frame = int(v)
+                        logger().debug('receive', i_frame)
                         if 0 < za_label[i_frame].max():
                             break
                     if (int(self.redis_c.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
                         return ((torch.tensor(-100.), self.keep_axials),
                                 torch.tensor(-100))
+                    if self.length != int(self.redis_c.get(REDIS_KEY_NCROPS)):
+                        return ((torch.tensor(-200.), self.keep_axials),
+                                torch.tensor(-200))
             elif self.length is not None:
                 i_frame = np.random.choice(self.indices)
             else:
@@ -300,7 +306,8 @@ class AutoencoderDatasetZarr(SegmentationDatasetZarr):
 class FlowDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_flow_label, indices, img_size,
                  crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
-                 scale_factor_base=0.2, rotation_angle=None):
+                 scale_factor_base=0.2, rotation_angle=None, is_eval=False,
+                 length=None, adaptive_length=False):
         if len(img_size) != len(crop_size):
             raise ValueError(
                 'img_size: {} and crop_size: {} should have the same length'
@@ -313,6 +320,11 @@ class FlowDatasetZarr(du.Dataset):
         self.zpath_input = zpath_input
         self.zpath_flow_label = zpath_flow_label
         self.indices = indices
+        self.is_eval = is_eval
+        if (adaptive_length and (length is not None) and
+                (len(indices) <= length)):
+            length = None
+        self.length = length
         crop_size = tuple(
             min(crop_size[i], img_size[i]) for i in range(len(crop_size)))
         self.img_size = img_size
@@ -337,13 +349,18 @@ class FlowDatasetZarr(du.Dataset):
             )
         ) for i in range(self.n_dims)]
         self.rotation_angle = rotation_angle
-        self.keep_axials = keep_axials
+        self.keep_axials = torch.tensor(keep_axials)
 
     def __len__(self):
+        if self.length is not None:
+            return self.length
         return len(self.indices) * self.n_crops
 
     def __getitem__(self, index):
-        i_frame = self.indices[index // self.n_crops]
+        if self.length is not None:
+            i_frame = np.random.choice(self.indices)
+        else:
+            i_frame = self.indices[index // self.n_crops]
         za_input = zarr.open(self.zpath_input, mode='r')
         img_input = np.array([
             normalize_zero_one(za_input[i].astype('float32'))
@@ -353,6 +370,11 @@ class FlowDatasetZarr(du.Dataset):
         img_label = za_label[i_frame]
         assert 0 < img_label[-1].max(), (
             'positive weight should exist in the label')
+        if self.is_eval:
+            tensor_input = torch.from_numpy(img_input)
+            tensor_label = torch.from_numpy(img_label)
+            tensor_target = torch.cat((tensor_label, tensor_input), )
+            return (tensor_input, self.keep_axials), tensor_target
         if self.rotation_angle is not None and 0 < self.rotation_angle:
             # rotate image
             theta = randint(-self.rotation_angle, self.rotation_angle)

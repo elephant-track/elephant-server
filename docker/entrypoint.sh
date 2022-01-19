@@ -17,6 +17,7 @@ fi
 export HOME=/home/user
 export UWSGI_UID=user
 export UWSGI_GID=user
+export MKL_THREADING_LAYER=GNU
 
 if [[ -z "${AS_LOCAL_USER}" ]]; then
   "$@"

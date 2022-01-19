@@ -24,6 +24,7 @@
 # ==============================================================================
 """Implementations of operations."""
 
+from collections import OrderedDict
 import gc
 import hashlib
 from functools import reduce
@@ -42,23 +43,37 @@ from skimage.filters import prewitt
 import skimage.io
 import skimage.measure
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.utils.data as du
+
 if os.environ.get('CTC') != '1':
-    import tensorboardX as tb
+    import torch.utils.tensorboard as tb
     import zarr
+    import redis
+    redis_client = redis.StrictRedis.from_url("redis://localhost:6379/0")
+try:
+    redis_client.ping()
+except Exception:
+    redis_client = None
 
 from elephant.datasets import AutoencoderDatasetZarr
+from elephant.datasets import FlowDatasetZarr
+from elephant.datasets import SegmentationDatasetZarr
+from elephant.logging import publish_mq
 from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
-from elephant.redis_util import REDIS_KEY_COUNT
 from elephant.redis_util import REDIS_KEY_LR
+from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
+from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
 from elephant.util import get_pad_size
+from elephant.util import get_device
 from elephant.util import normalize_zero_one
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
@@ -78,151 +93,458 @@ class TensorBoard(object):
         self.writer.add_scalar(tag=tag, scalar_value=value, global_step=step)
 
 
-def train(model, device, loader, optimizer, loss_fn, epoch,
-          log_interval=100, tb_logger=None, redis_client=None, step_offset=0):
-    model.train()
-    model.to(device)
-    count = 0
-    loss_avg = 0
-    if isinstance(loss_fn, SegmentationLoss):
-        nll_loss_avg = 0
-        center_loss_avg = 0
-        smooth_loss_avg = 0
-    elif isinstance(loss_fn, FlowLoss):
-        instance_loss_avg = 0
-        ssim_loss_avg = 0
-        smooth_loss_avg = 0
-    for batch_id, ((x, keep_axials), y) in enumerate(loader):
-        # (torch.tensor(-100.), torch.tensor(-100)) is returned when aborted
-        if (torch.eq(x, torch.tensor(-100.)).any() and
-                torch.eq(y, torch.tensor(-100)).any()):
-            break
-        if redis_client is not None:
-            while (int(redis_client.get(REDIS_KEY_STATE)) ==
-                   TrainState.WAIT.value):
-                logger().info('waiting @train')
-                time.sleep(1)
-            if (int(redis_client.get(REDIS_KEY_STATE)) ==
-                    TrainState.IDLE.value):
-                break
-        try:
-            x, y = x.to(device), y.to(device)
+def setup(rank, world_size, backend='gloo'):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
 
-            # set leargning rate
-            if (redis_client is not None and
-                    redis_client.get(REDIS_KEY_LR) is not None):
-                for g in optimizer.param_groups:
-                    g['lr'] = float(redis_client.get(REDIS_KEY_LR))
+    # initialize the process group
+    if not dist.is_initialized():
+        dist.init_process_group(backend, rank=rank, world_size=world_size)
+        logger().info(f"Running DDP on rank {rank} using backend {backend}.")
 
-            optimizer.zero_grad()
-            prediction = model(x, keep_axials)
-            loss = loss_fn(prediction, y)
-            loss.backward()
-            optimizer.step()
 
-            count += 1
-            loss_avg += loss.item()
-            if isinstance(loss_fn, SegmentationLoss):
-                nll_loss_avg += loss_fn.nll_loss.item()
-                center_loss_avg += loss_fn.center_loss.item()
-                smooth_loss_avg += loss_fn.smooth_loss.item()
-            elif isinstance(loss_fn, FlowLoss):
-                instance_loss_avg += loss_fn.instance_loss.item()
-                ssim_loss_avg += loss_fn.ssim_loss.item()
-                smooth_loss_avg += loss_fn.smooth_loss.item()
-            # log to console
-            if (batch_id % log_interval == (log_interval - 1) or
-                    batch_id == (len(loader) - 1)):
-                loss_avg /= count
-                if isinstance(loss_fn, SegmentationLoss):
-                    nll_loss_avg /= count
-                    center_loss_avg /= count
-                    smooth_loss_avg /= count
-                elif isinstance(loss_fn, FlowLoss):
-                    instance_loss_avg /= count
-                    ssim_loss_avg /= count
-                    smooth_loss_avg /= count
-                msg = (
-                    'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                        epoch,
-                        (batch_id + 1) * loader.batch_size,
-                        len(loader.dataset),
-                        100. * (batch_id + 1) / len(loader),
-                        loss_avg
-                    )
-                )
-                # SegmentatioinLoss only
-                if isinstance(loss_fn, SegmentationLoss):
-                    msg += f'\tNLL Loss: {nll_loss_avg:.6f}'
-                    msg += f'\tCenter Dice Loss: {center_loss_avg:.6f}'
-                    msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
-                # FlowLoss only
-                elif isinstance(loss_fn, FlowLoss):
-                    msg += f'\tInstance Loss: {instance_loss_avg:.6f}'
-                    msg += f'\tSSIM Loss: {ssim_loss_avg:.6f}'
-                    msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
-                logger().info(msg)
+def cleanup():
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
-                # log to tensorboard
-                if tb_logger is not None:
-                    step = step_offset + epoch * len(loader) + batch_id
-                    tb_logger.log_scalar(
-                        tag='train_loss',
-                        value=loss_avg,
-                        step=step
-                    )
-                    # SegmentatioinLoss only
+
+def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
+                  crop_size, class_weights, false_weight, model_path, n_epochs,
+                  keep_axials, scales, lr, n_crops, is_3d, is_livemode,
+                  scale_factor_base, rotation_angle, zpath_input,
+                  zpath_seg_label, log_interval=100, log_dir=None,
+                  step_offset=0, epoch_start=0, is_cpu=False,
+                  is_mixed_precision=True):
+    models = load_seg_models(model_path,
+                             keep_axials,
+                             get_device(),
+                             is_3d=is_3d,
+                             zpath_input=zpath_input,
+                             crop_size=crop_size,
+                             scales=scales)
+    weight_tensor = torch.tensor(class_weights).float()
+    loss_fn = SegmentationLoss(class_weights=weight_tensor,
+                               false_weight=false_weight,
+                               is_3d=is_3d)
+
+    optimizers = [torch.optim.Adam(model.parameters(), lr=lr)
+                  for model in models]
+
+    n_dims = 2 + is_3d  # 3 or 2
+    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    dataset = SegmentationDatasetZarr(
+        zpath_input,
+        zpath_seg_label,
+        spot_indices,
+        input_shape,
+        crop_size,
+        n_crops,
+        keep_axials,
+        scales=scales,
+        is_livemode=is_livemode,
+        redis_client=redis_client,
+        scale_factor_base=scale_factor_base,
+        rotation_angle=rotation_angle,
+    )
+    loader = du.DataLoader(dataset, batch_size=batch_size,
+                           shuffle=True, num_workers=world_size*2)
+    run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
+              n_epochs, model_path, is_livemode, log_interval=log_interval,
+              log_dir=log_dir, step_offset=step_offset, epoch_start=epoch_start,
+              is_cpu=is_cpu, is_mixed_precision=is_mixed_precision)
+
+
+def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
+                        n_epochs, keep_axials, scales, lr, n_crops,
+                        is_3d, zpath_input, log_interval=100,
+                        log_dir=None, step_offset=0, epoch_start=0,
+                        is_cpu=False, is_mixed_precision=True):
+    models = load_seg_models(model_path,
+                             keep_axials,
+                             get_device(),
+                             is_3d=is_3d,
+                             zpath_input=zpath_input,
+                             crop_size=crop_size,
+                             scales=scales)
+    loss_fn = AutoencoderLoss()
+
+    optimizers = [torch.optim.Adam(model.parameters(), lr=lr)
+                  for model in models]
+
+    n_dims = 2 + is_3d  # 3 or 2
+    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    dataset = AutoencoderDatasetZarr(
+        zpath_input,
+        input_shape,
+        crop_size,
+        n_crops,
+        keep_axials=keep_axials,
+        scales=scales,
+        scale_factor_base=0.2,
+    )
+    loader = du.DataLoader(dataset, batch_size=1,
+                           shuffle=True, num_workers=1)
+    run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
+              n_epochs, model_path, log_interval=log_interval, log_dir=log_dir,
+              step_offset=step_offset, epoch_start=epoch_start, is_cpu=is_cpu,
+              is_mixed_precision=is_mixed_precision)
+
+
+def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
+                   crop_size, model_path, n_epochs, keep_axials, scales, lr,
+                   n_crops, is_3d, scale_factor_base, rotation_angle,
+                   zpath_input, zpath_flow_label, log_interval=100,
+                   log_dir=None, step_offset=0, epoch_start=0, is_cpu=False,
+                   is_mixed_precision=True):
+    models = load_flow_models(model_path,
+                              get_device(),
+                              is_3d=is_3d)
+    loss_fn = FlowLoss(is_3d=is_3d)
+
+    optimizers = [torch.optim.Adam(model.parameters(), lr=lr)
+                  for model in models]
+
+    n_dims = 2 + is_3d  # 3 or 2
+    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    dataset = FlowDatasetZarr(
+        zpath_input,
+        zpath_flow_label,
+        spot_indices,
+        input_shape,
+        crop_size,
+        n_crops,
+        keep_axials=keep_axials,
+        scales=scales,
+        scale_factor_base=scale_factor_base,
+        rotation_angle=rotation_angle,
+    )
+    loader = du.DataLoader(dataset, batch_size=batch_size)
+    run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
+              n_epochs, model_path, log_interval=log_interval, log_dir=log_dir,
+              step_offset=step_offset, epoch_start=epoch_start, is_cpu=is_cpu,
+              is_mixed_precision=is_mixed_precision)
+
+
+def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
+              n_epochs, model_path, is_livemode=False, log_interval=100,
+              log_dir=None, step_offset=0, epoch_start=0, eval_loader=None,
+              patch_size=None, is_cpu=False, is_mixed_precision=True):
+    if not torch.cuda.is_available():
+        is_cpu = True
+        is_mixed_precision = False
+    if is_cpu:
+        device = torch.device('cpu')
+        device_ids = None
+        ddp_backend = 'gloo'
+    else:
+        device = rank_or_device
+        device_ids = [device]
+        ddp_backend = 'nccl'
+    for model in models:
+        model.train()
+        model.to(device)
+    is_ddp = True
+    try:
+        setup(rank_or_device, world_size, ddp_backend)
+    except Exception:
+        logger().info('DistributedDataParallel is not used.')
+        is_ddp = False
+        world_size = 1
+    is_logging = True
+    if is_ddp:
+        models = [DDP(model, device_ids=device_ids) for model in models]
+        loader = to_ddp_loader(loader,
+                               world_size,
+                               rank_or_device,
+                               True)
+        if eval_loader:
+            eval_loader = to_ddp_loader(eval_loader,
+                                        world_size,
+                                        rank_or_device,
+                                        False)
+        # only rank=0 is used for logging
+        is_logging = rank_or_device == 0
+    try:
+        loss_fn = loss_fn.to(device)
+
+        if is_mixed_precision:
+            scaler = torch.cuda.amp.GradScaler()
+
+        if eval_loader:
+            min_loss = sum([evaluate(model,
+                                     device,
+                                     eval_loader,
+                                     loss_fn=loss_fn,
+                                     patch_size=patch_size,
+                                     is_ddp=is_ddp,
+                                     is_logging=is_logging)
+                            for model in models]) / len(models)
+            if is_logging:
+                state_dicts_best = [
+                    OrderedDict({
+                        k[7:]: v for k, v in model.state_dict().items()
+                    }) if is_ddp else
+                    model.state_dict() for model in models]
+
+        epoch = epoch_start
+        while is_livemode or epoch < epoch_start + n_epochs:
+            if is_ddp:
+                dist.barrier()
+            if is_livemode:
+                redis_client.delete(REDIS_KEY_TIMEPOINT)
+            is_ncrops_updated = False
+            for model, optimizer in zip(models, optimizers):
+                if is_logging:
+                    count = 0
+                    loss_avg = 0
+                    eval_loss = 0
                     if isinstance(loss_fn, SegmentationLoss):
-                        tb_logger.log_scalar(
-                            tag='nll_loss',
-                            value=nll_loss_avg,
-                            step=step
-                        )
-                        tb_logger.log_scalar(
-                            tag='center_dice_loss',
-                            value=center_loss_avg,
-                            step=step
-                        )
-                        tb_logger.log_scalar(
-                            tag='smooth_loss',
-                            value=smooth_loss_avg,
-                            step=step
-                        )
-                    # FlowLoss only
+                        nll_loss_avg = 0
+                        center_loss_avg = 0
+                        smooth_loss_avg = 0
                     elif isinstance(loss_fn, FlowLoss):
-                        tb_logger.log_scalar(
-                            tag='instance_loss',
-                            value=instance_loss_avg,
-                            step=step
+                        instance_loss_avg = 0
+                        ssim_loss_avg = 0
+                        smooth_loss_avg = 0
+                for batch_id, ((x, keep_axials), y) in enumerate(loader):
+                    # (torch.tensor(-100.), torch.tensor(-100))
+                    # is returned when aborted
+                    if (torch.eq(x, torch.tensor(-100.)).any() and
+                            torch.eq(y, torch.tensor(-100)).any()):
+                        return
+                    if (torch.eq(x, torch.tensor(-200.)).any() and
+                            torch.eq(y, torch.tensor(-200)).any()):
+                        is_ncrops_updated = True
+                        break
+                    if redis_client is not None:
+                        while (int(redis_client.get(REDIS_KEY_STATE)) ==
+                               TrainState.WAIT.value):
+                            if is_logging:
+                                logger().info('waiting @train')
+                            time.sleep(1)
+                        if (int(redis_client.get(REDIS_KEY_STATE)) ==
+                                TrainState.IDLE.value):
+                            return
+                    x, y = x.to(device), y.to(device)
+
+                    # set leargning rate
+                    if (redis_client is not None and
+                            redis_client.get(REDIS_KEY_LR) is not None):
+                        for g in optimizer.param_groups:
+                            g['lr'] = float(redis_client.get(REDIS_KEY_LR))
+
+                    optimizer.zero_grad()
+
+                    if is_mixed_precision:
+                        with torch.cuda.amp.autocast():
+                            prediction = model(x, keep_axials)
+                            loss = loss_fn(prediction, y)
+                        scaler.scale(loss).backward()
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        prediction = model(x, keep_axials)
+                        loss = loss_fn(prediction, y)
+                        loss.backward()
+                        optimizer.step()
+
+                    if is_ddp:
+                        dist.all_reduce(loss)
+
+                    if not is_logging:
+                        continue
+
+                    count += 1
+                    loss_avg += loss.item()
+                    if isinstance(loss_fn, SegmentationLoss):
+                        nll_loss_avg += loss_fn.nll_loss.item()
+                        center_loss_avg += loss_fn.center_loss.item()
+                        smooth_loss_avg += loss_fn.smooth_loss.item()
+                    elif isinstance(loss_fn, FlowLoss):
+                        instance_loss_avg += loss_fn.instance_loss.item()
+                        ssim_loss_avg += loss_fn.ssim_loss.item()
+                        smooth_loss_avg += loss_fn.smooth_loss.item()
+
+                    if ((batch_id % log_interval == (log_interval - 1)) or
+                            (batch_id == (len(loader) - 1))):
+                        loss_avg /= count
+                        if isinstance(loss_fn, SegmentationLoss):
+                            nll_loss_avg /= count
+                            center_loss_avg /= count
+                            smooth_loss_avg /= count
+                        elif isinstance(loss_fn, FlowLoss):
+                            instance_loss_avg /= count
+                            ssim_loss_avg /= count
+                            smooth_loss_avg /= count
+                        completed = min(
+                            len(loader.dataset),
+                            (batch_id + 1) * loader.batch_size * world_size
                         )
-                        tb_logger.log_scalar(
-                            tag='SSIM_loss',
-                            value=ssim_loss_avg,
-                            step=step
+                        msg = (
+                            'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.
+                            format(
+                                epoch,
+                                completed,
+                                len(loader.dataset),
+                                100. * completed / len(loader.dataset),
+                                loss_avg
+                            )
                         )
-                        tb_logger.log_scalar(
-                            tag='smooth_loss',
-                            value=smooth_loss_avg,
-                            step=step
+                        # SegmentatioinLoss only
+                        if isinstance(loss_fn, SegmentationLoss):
+                            msg += f'\tNLL Loss: {nll_loss_avg:.6f}'
+                            msg += f'\tCenter Dice Loss: {center_loss_avg:.6f}'
+                            msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
+                        # FlowLoss only
+                        elif isinstance(loss_fn, FlowLoss):
+                            msg += f'\tInstance Loss: {instance_loss_avg:.6f}'
+                            msg += f'\tSSIM Loss: {ssim_loss_avg:.6f}'
+                            msg += f'\tSmooth Loss: {smooth_loss_avg:.6f}'
+
+                        # log to console
+                        logger().info(msg)
+
+                        # log to tensorboard
+                        if log_dir is not None:
+                            if 'tb_logger' not in locals():
+                                tb_logger = TensorBoard(log_dir)
+                            step = step_offset + epoch * len(loader) + batch_id
+                            tb_logger.log_scalar(
+                                tag='train_loss',
+                                value=loss_avg,
+                                step=step
+                            )
+                            # SegmentatioinLoss only
+                            if isinstance(loss_fn, SegmentationLoss):
+                                tb_logger.log_scalar(
+                                    tag='nll_loss',
+                                    value=nll_loss_avg,
+                                    step=step
+                                )
+                                tb_logger.log_scalar(
+                                    tag='center_dice_loss',
+                                    value=center_loss_avg,
+                                    step=step
+                                )
+                                tb_logger.log_scalar(
+                                    tag='smooth_loss',
+                                    value=smooth_loss_avg,
+                                    step=step
+                                )
+                            # FlowLoss only
+                            elif isinstance(loss_fn, FlowLoss):
+                                tb_logger.log_scalar(
+                                    tag='instance_loss',
+                                    value=instance_loss_avg,
+                                    step=step
+                                )
+                                tb_logger.log_scalar(
+                                    tag='SSIM_loss',
+                                    value=ssim_loss_avg,
+                                    step=step
+                                )
+                                tb_logger.log_scalar(
+                                    tag='smooth_loss',
+                                    value=smooth_loss_avg,
+                                    step=step
+                                )
+                        count = 0
+                        loss_avg = 0
+                        if isinstance(loss_fn, SegmentationLoss):
+                            nll_loss_avg = 0
+                            center_loss_avg = 0
+                            smooth_loss_avg = 0
+                        elif isinstance(loss_fn, FlowLoss):
+                            instance_loss_avg = 0
+                            ssim_loss_avg = 0
+                            smooth_loss_avg = 0
+                if is_ncrops_updated:
+                    loader.dataset.length = int(
+                        redis_client.get(REDIS_KEY_NCROPS))
+                    loader = to_ddp_loader(loader,
+                                           world_size,
+                                           rank_or_device,
+                                           True)
+                    if eval_loader:
+                        eval_loader = to_ddp_loader(eval_loader,
+                                                    world_size,
+                                                    rank_or_device,
+                                                    False)
+                    break
+                if eval_loader:
+                    model_eval_loss = evaluate(model,
+                                               device,
+                                               eval_loader,
+                                               loss_fn=loss_fn,
+                                               patch_size=patch_size,
+                                               is_ddp=is_ddp,
+                                               is_logging=is_logging)
+                    if is_logging:
+                        eval_loss += model_eval_loss
+            if is_ncrops_updated:
+                continue
+            if is_logging:
+                # https://discuss.pytorch.org/t/solved-keyerror-unexpected-key-module-encoder-embedding-weight-in-state-dict/1686/4
+                state_dicts = [
+                    OrderedDict({
+                        k[7:]: v for k, v in model.state_dict().items()
+                    }) if is_ddp and not is_cpu else
+                    model.state_dict() for model in models]
+                torch.save(state_dicts[0] if len(models) == 1 else
+                           state_dicts,
+                           model_path)
+                if eval_loader:
+                    eval_loss /= len(models)
+
+                    # log to console
+                    msg = (
+                        'Eval Epoch: {} \tLoss: {:.6f}'.format(
+                            epoch,
+                            loss
                         )
-                count = 0
-                loss_avg = 0
-                if isinstance(loss_fn, SegmentationLoss):
-                    nll_loss_avg = 0
-                    center_loss_avg = 0
-                    smooth_loss_avg = 0
-                elif isinstance(loss_fn, FlowLoss):
-                    instance_loss_avg = 0
-                    ssim_loss_avg = 0
-                    smooth_loss_avg = 0
-        finally:
-            torch.cuda.empty_cache()
+                    )
+                    logger().info(msg)
+
+                    # log to tensorboard
+                    if tb_logger is not None:
+                        tb_logger.log_scalar(
+                            tag='eval_loss',
+                            value=loss,
+                            step=epoch
+                        )
+
+                    if eval_loss < min_loss:
+                        min_loss = eval_loss
+                        state_dicts_best = state_dicts
+                        torch.save(state_dicts_best[0] if len(models) == 1 else
+                                   state_dicts_best,
+                                   model_path.replace('.pth', '_best.pth'))
+                    else:
+                        pass
+                        # for model, sdict in zip(models, state_dicts_best):
+                        #     model.load_state_dict(sdict)
+                publish_mq('update', 'Model updated')
+            epoch += 1
+    finally:
+        cleanup()
+        torch.cuda.empty_cache()
 
 
-def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
-             patch_size=None):
+def to_ddp_loader(loader, num_replicas, rank, shuffle):
+    sampler = du.DistributedSampler(loader.dataset,
+                                    num_replicas=num_replicas,
+                                    rank=rank,
+                                    shuffle=shuffle)
+    return du.DataLoader(loader.dataset,
+                         batch_size=loader.batch_size,
+                         sampler=sampler)
+
+
+def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
+             is_logging=True):
     model.eval()
     model.to(device)
+    loss_fn.to(device)
     loss = 0
     with torch.no_grad():
         for batch_id, ((x, keep_axials), y) in enumerate(loader):
@@ -237,32 +559,23 @@ def evaluate(model, device, loader, loss_fn, epoch, tb_logger=None,
                 prediction = model(x, keep_axials)
             else:
                 prediction = torch.from_numpy(
-                    predict(model, x, keep_axials, patch_size, is_log=False)
-                )[None].to(device)
+                    predict(model, x, keep_axials, patch_size,
+                            is_logarithm=False, is_logging=is_logging)
+                ).to(device)
             loss += loss_fn(prediction, y).item()
         loss /= len(loader)
-    # log to console
-    msg = (
-        'Eval Epoch: {} \tLoss: {:.6f}'.format(
-            epoch,
-            loss
-        )
-    )
-    logger().info(msg)
 
-    # log to tensorboard
-    if tb_logger is not None:
-        tb_logger.log_scalar(
-            tag='eval_loss',
-            value=loss,
-            step=epoch
-        )
+    if is_ddp:
+        loss = torch.tensor(loss, device=device)
+        dist.all_reduce(loss)
+        loss = loss.item()
     return loss
 
 
-def _patch_predict(model, x, keep_axials, patch_size, func):
+def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
     n_dims = len(patch_size)
     input_shape = x.shape[-n_dims:]
+    n_batches = x.shape[0]
     # all elements in patch shape should be smaller than or equal to those of
     # input shape
     patch_size = [min(patch_size[i], input_shape[i]) for i in range(n_dims)]
@@ -281,8 +594,12 @@ def _patch_predict(model, x, keep_axials, patch_size, func):
         for i in range(n_dims)
     ]
     overlaps = [max(1, patch_size[i] - intervals[i]) for i in range(n_dims)]
-    prediction = np.zeros((model.out_conv.out_channels,) +
-                          input_shape, dtype='float32')
+    out_channels = (
+        model.module.out_conv.out_channels if isinstance(model, DDP) else
+        model.out_conv.out_channels
+    )
+    prediction = np.zeros((n_batches, out_channels,) + input_shape,
+                          dtype='float32')
     sum_patches = np.prod(n_patches)
     i_patch = 0
     for iz in range(n_patches[-3] if n_dims == 3 else 1):
@@ -320,7 +637,8 @@ def _patch_predict(model, x, keep_axials, patch_size, func):
                 ).reshape(1, -1, 1)
             for ix in range(n_patches[-1]):
                 i_patch += 1
-                logger().info(f'processing {i_patch} / {sum_patches}')
+                if is_logging:
+                    logger().info(f'processing {i_patch} / {sum_patches}')
                 slice_x = slice(intervals[-1] * ix,
                                 intervals[-1] * ix + patch_size[-1])
                 if x.shape[-1] < slice_x.stop:
@@ -338,24 +656,26 @@ def _patch_predict(model, x, keep_axials, patch_size, func):
                 if n_dims == 3:
                     slices.insert(2, slice_z)
                 y = func(
-                    model(x[slices], keep_axials)[0].detach().cpu().numpy()
+                    model(x[slices], keep_axials).detach().cpu().numpy()
                 )
                 if n_dims == 2:
                     patch_weight_zyx = patch_weight_zyx[0]
-                prediction[tuple(slices[1:])] += y * patch_weight_zyx
+                prediction[tuple(slices)] += y * patch_weight_zyx[None, None]
     return prediction
 
 
-def predict(model, x, keep_axials, patch_size=None, is_log=True):
-    func = (lambda x: np.exp(x)) if is_log else (lambda x: x)
+def predict(model, x, keep_axials, patch_size=None, is_logarithm=True,
+            is_logging=True):
+    func = (lambda x: np.exp(x)) if is_logarithm else (lambda x: x)
     if patch_size is not None:
-        return _patch_predict(model, x, keep_axials, patch_size, func)
+        return _patch_predict(model, x, keep_axials, patch_size, func,
+                              is_logging)
     else:
-        return func(model(x, keep_axials)[0].detach().cpu().numpy())
+        return func(model(x, keep_axials).detach().cpu().numpy())
 
 
 def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
-                        patch_size=None, crop_box=None):
+                        patch_size=None, crop_box=None, is_logging=True):
     img = img.astype('float32')
     n_dims = len(img.shape)
     is_3d = n_dims == 3
@@ -388,11 +708,13 @@ def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
         img = np.pad(img, pad_shape, mode='constant', constant_values=0)
     with torch.no_grad():
         x = torch.from_numpy(img[np.newaxis, np.newaxis]).to(device)
+        keep_axials = torch.tensor(keep_axials)[None]
         prediction = np.mean([predict(model,
                                       x,
                                       keep_axials,
                                       patch_size,
-                                      is_log=True)
+                                      is_logarithm=True,
+                                      is_logging=is_logging)[0]
                               for model in models], axis=0)
     if patch_size is None:
         prediction = prediction[slices]
@@ -412,7 +734,7 @@ def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
     return prediction
 
 
-def detect_spots(config, redis_client=None):
+def detect_spots(config):
     if hasattr(config, 'tiff_input') and config.tiff_input is not None:
         img_input = skimage.io.imread(config.tiff_input)
     elif config.zpath_input is not None:
@@ -422,11 +744,11 @@ def detect_spots(config, redis_client=None):
         models = load_seg_models(config.model_path,
                                  config.keep_axials,
                                  config.device,
+                                 is_eval=True,
                                  is_3d=config.is_3d,
                                  zpath_input=config.zpath_input,
                                  crop_size=config.crop_size,
-                                 scales=config.scales,
-                                 redis_client=redis_client)
+                                 scales=config.scales)
         if len(img_input.shape) == 3 and config.use_2d:
             prediction = np.swapaxes(np.array([
                 _get_seg_prediction(img_input[z],
@@ -485,7 +807,7 @@ def detect_spots(config, redis_client=None):
 
 
 def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
-                         is_3d):
+                         is_3d, is_logging=True):
     img = normalize_zero_one(img.astype('float32'))
     models = load_flow_models(model_path,
                               device,
@@ -506,9 +828,11 @@ def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
         img = np.pad(img, ((0, 0),) + pad_shape, mode='reflect')
     with torch.no_grad():
         x = torch.from_numpy(img[np.newaxis]).to(device)
+        keep_axials = torch.tensor(keep_axials)[None]
         prediction = np.mean(
             [
-                predict(model, x, keep_axials, patch_size, is_log=False)
+                predict(model, x, keep_axials, patch_size, is_logarithm=False,
+                        is_logging=is_logging)[0]
                 for model in models
             ],
             axis=0)
@@ -638,6 +962,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
     origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
     labels = skimage.measure.label(p_thresh < c_probs)
     regions = skimage.measure.regionprops(labels)
+    logger().info(f'{len(regions)} detections found')
 
     if scales is None:
         scales = (1.,) * n_dims
@@ -771,7 +1096,7 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                     n_crops=0, zpath_input=None, crop_size=None, scales=None,
-                    redis_client=None, url='Versatile', state_dicts=None):
+                    url='Versatile', state_dicts=None, is_cpu=False):
     if state_dicts is None:
         state_dicts = [None, ] * n_models
         if url == 'Versatile':
@@ -787,6 +1112,9 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
         is_3d=is_3d,
         state_dict=state_dicts[i],
     ) for i in range(n_models)]
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(models[0].state_dict() if len(models) == 1 else
+               [model.state_dict() for model in models], model_path)
     if all(state_dict is None for state_dict in state_dicts):
         if 0 < n_crops:
             errors = []
@@ -798,43 +1126,12 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                 for error in errors:
                     logger().error(error)
             else:
-                n_dims = 2 + is_3d  # 3 or 2
-                input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
-                try:
-                    if redis_client is not None:
-                        redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)
-                    train_dataset = AutoencoderDatasetZarr(
-                        zpath_input,
-                        input_shape,
-                        crop_size,
-                        n_crops,
-                        keep_axials=keep_axials,
-                        scales=scales,
-                        scale_factor_base=0.2,
+                for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
+                    run_train_prior_seg(
+                        device, 1, crop_size, model_path, 1, keep_axials,
+                        scales, lr, n_crops, is_3d, zpath_input,
+                        log_interval=1, epoch_start=i, is_cpu=is_cpu,
                     )
-                    loss = AutoencoderLoss()
-                    loss = loss.to(device)
-                    train_loader = du.DataLoader(
-                        train_dataset, shuffle=True, batch_size=1)
-                    for i, lr in enumerate([1e-2, 1e-3, 1e-4]):
-                        optimizers = [torch.optim.Adam(
-                            model.parameters(), lr=lr) for model in models]
-                        for model, optimizer in zip(models, optimizers):
-                            train(model,
-                                  device,
-                                  train_loader,
-                                  optimizer=optimizer,
-                                  loss_fn=loss,
-                                  epoch=i,
-                                  log_interval=1)
-                finally:
-                    if redis_client is not None:
-                        redis_client.set(REDIS_KEY_COUNT, 0)
-                        redis_client.set(
-                            REDIS_KEY_STATE, TrainState.IDLE.value)
-    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(models[0].state_dict() if len(models) == 1 else
-               [model.state_dict() for model in models], model_path)
 
 
 def init_flow_models(model_path, device, is_3d=True, n_models=1,
@@ -869,7 +1166,7 @@ def init_flow_models(model_path, device, is_3d=True, n_models=1,
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
                     is_decoder_only=False, is_pad=False, is_3d=True,
                     n_models=1, n_crops=5, zpath_input=None, crop_size=None,
-                    scales=None, redis_client=None, url='Versatile'):
+                    scales=None, url='Versatile', is_cpu=False):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
@@ -883,8 +1180,8 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
                             zpath_input,
                             crop_size,
                             scales,
-                            redis_client=redis_client,
-                            url=url)
+                            url=url,
+                            is_cpu=is_cpu)
         finally:
             gc.collect()
             torch.cuda.empty_cache()

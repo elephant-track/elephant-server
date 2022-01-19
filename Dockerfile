@@ -37,10 +37,12 @@ ENV RABBITMQ_PID_FILE /var/lib/rabbitmq/mnesia/rabbitmq.pid
 COPY docker/rabbitmq.sh /rabbitmq.sh
 RUN chmod +x /rabbitmq.sh
 
+RUN conda install celery matplotlib
+
 # Set up nginx
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80 443
-RUN groupadd nginx && useradd -g nginx nginx
+RUN groupadd -r nginx && useradd -r -g nginx nginx
 # forward request and error logs to docker log collector
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log

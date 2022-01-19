@@ -3,10 +3,10 @@
 help:
 	@cat Makefile
 
-ELEPHANT_GPU?=0
+ELEPHANT_GPU?=all
 ELEPHANT_WORKSPACE?=${PWD}/workspace
 ELEPHANT_IMAGE_NAME?=elephant-server:0.4.0-dev
-ELEPHANT_NVIDIA_GID?=$$(ls -n /dev/nvidia$(ELEPHANT_GPU) | awk '{print $$4}')
+ELEPHANT_NVIDIA_GID?=$$(ls -n /dev/nvidia0 2>/dev/null | awk '{print $$4}')
 ELEPHANT_DOCKER?=docker
 
 rebuild:
@@ -29,17 +29,17 @@ warmup:
 	$(ELEPHANT_DOCKER) run -it --rm --gpus all $(ELEPHANT_IMAGE_NAME) echo "warming up..."
 
 launch: warmup
-	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace -p 8080:80 -p 5672:5672 \
+	$(ELEPHANT_DOCKER) run -it --rm --gpus '"device=$(ELEPHANT_GPU)"' --shm-size=256m -v $(ELEPHANT_WORKSPACE):/workspace -p 8080:80 -p 5672:5672 \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
 	$(ELEPHANT_IMAGE_NAME)
 
 bash: warmup
-	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace \
+	$(ELEPHANT_DOCKER) run -it --rm --gpus '"device=$(ELEPHANT_GPU)"' --shm-size=256m -v $(ELEPHANT_WORKSPACE):/workspace \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
 
 bashroot:
-	$(ELEPHANT_DOCKER) run -it --rm --gpus device=$(ELEPHANT_GPU) -v $(ELEPHANT_WORKSPACE):/workspace \
+	$(ELEPHANT_DOCKER) run -it --rm --gpus '"device=$(ELEPHANT_GPU)"' --shm-size=256m -v $(ELEPHANT_WORKSPACE):/workspace \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
 
 test:

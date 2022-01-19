@@ -34,10 +34,11 @@ import zarr
 from tqdm import tqdm
 
 from elephant.logging import logger
+from elephant.logging import publish_mq
 
 
 def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
-                     connection=None):
+                     is_message_queue=False):
     """Generate a dataset for ELEPHANT.
 
     Parameters
@@ -57,8 +58,8 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     is_2d : bool
         With this flag, the original image will be stored as 2d+time.
         default: False (3d+time)
-    connection : pika.BlockingConnection
-        Use optionally to report progress.
+    is_message_queue : bool
+        With this flag, progress is reported using pika.BlockingConnection.
 
     This function will generate the following files.
 
@@ -92,6 +93,7 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     n_dims = 3 - is_2d  # 3 or 2
     n_timepoints = len(timepoints)
     p = Path(output)
+    chunk_shape = tuple(min(s, 1024) for s in shape)
     img = zarr.open(
         str(p / 'imgs.zarr'),
         'w',
@@ -103,7 +105,7 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         str(p / 'flow_outputs.zarr'),
         'w',
         shape=(n_timepoints - 1, n_dims,) + shape,
-        chunks=(1, 1,) + shape,
+        chunks=(1, 1,) + chunk_shape,
         dtype='f2'
     )
     zarr.open(
@@ -116,27 +118,27 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         str(p / 'flow_labels.zarr'),
         'w',
         shape=(n_timepoints - 1, n_dims + 1,) + shape,
-        chunks=(1, 1,) + shape,
+        chunks=(1, 1,) + chunk_shape,
         dtype='f4'
     )
     zarr.open(
         str(p / 'seg_outputs.zarr'),
         'w',
         shape=(n_timepoints,) + shape + (3,),
-        chunks=(1,) + shape + (3,),
+        chunks=(1,) + chunk_shape + (3,),
         dtype='f2'
     )
     zarr.open(
         str(p / 'seg_labels.zarr'),
         'w',
         shape=(n_timepoints,) + shape,
-        chunks=(1,) + shape, dtype='u1'
+        chunks=(1,) + chunk_shape, dtype='u1'
     )
     zarr.open(
         str(p / 'seg_labels_vis.zarr'),
         'w',
         shape=(n_timepoints,) + shape + (3,),
-        chunks=(1,) + shape + (3,),
+        chunks=(1,) + chunk_shape + (3,),
         dtype='u1'
     )
     dtype = np.uint16 if is_uint16 else np.uint8
@@ -145,15 +147,9 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         img[int(timepoint[1:])] = (
             np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
         ).astype(dtype)
-        if connection is not None:
-            connection.channel().basic_publish(
-                exchange='',
-                routing_key='dataset',
-                body=json.dumps({
-                    't_max': n_timepoints,
-                    't_current': t + 1,
-                })
-            )
+        if is_message_queue:
+            publish_mq('dataset', json.dumps({'t_max': n_timepoints,
+                                              't_current': t + 1, }))
 
 
 def check_dataset(dataset, shape):

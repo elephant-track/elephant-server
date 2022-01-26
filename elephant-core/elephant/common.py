@@ -114,14 +114,15 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
                   scale_factor_base, rotation_angle, zpath_input,
                   zpath_seg_label, log_interval=100, log_dir=None,
                   step_offset=0, epoch_start=0, is_cpu=False,
-                  is_mixed_precision=True):
+                  is_mixed_precision=True, cache_maxbytes=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
                              is_3d=is_3d,
                              zpath_input=zpath_input,
                              crop_size=crop_size,
-                             scales=scales)
+                             scales=scales,
+                             cache_maxbytes=cache_maxbytes)
     weight_tensor = torch.tensor(class_weights).float()
     loss_fn = SegmentationLoss(class_weights=weight_tensor,
                                false_weight=false_weight,
@@ -145,6 +146,7 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
         redis_client=redis_client,
         scale_factor_base=scale_factor_base,
         rotation_angle=rotation_angle,
+        cache_maxbytes=cache_maxbytes,
     )
     loader = du.DataLoader(dataset, batch_size=batch_size,
                            shuffle=True, num_workers=world_size*2)
@@ -158,14 +160,16 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
                         n_epochs, keep_axials, scales, lr, n_crops,
                         is_3d, zpath_input, log_interval=100,
                         log_dir=None, step_offset=0, epoch_start=0,
-                        is_cpu=False, is_mixed_precision=True):
+                        is_cpu=False, is_mixed_precision=True,
+                        cache_maxbytes=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
                              is_3d=is_3d,
                              zpath_input=zpath_input,
                              crop_size=crop_size,
-                             scales=scales)
+                             scales=scales,
+                             cache_maxbytes=cache_maxbytes)
     loss_fn = AutoencoderLoss()
 
     optimizers = [torch.optim.Adam(model.parameters(), lr=lr)
@@ -181,6 +185,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
         keep_axials=keep_axials,
         scales=scales,
         scale_factor_base=0.2,
+        cache_maxbytes=cache_maxbytes,
     )
     loader = du.DataLoader(dataset, batch_size=1,
                            shuffle=True, num_workers=1)
@@ -195,7 +200,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                    n_crops, is_3d, scale_factor_base, rotation_angle,
                    zpath_input, zpath_flow_label, log_interval=100,
                    log_dir=None, step_offset=0, epoch_start=0, is_cpu=False,
-                   is_mixed_precision=True):
+                   is_mixed_precision=True, cache_maxbytes=None):
     models = load_flow_models(model_path,
                               get_device(),
                               is_3d=is_3d)
@@ -217,6 +222,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
         scales=scales,
         scale_factor_base=scale_factor_base,
         rotation_angle=rotation_angle,
+        cache_maxbytes=cache_maxbytes,
     )
     loader = du.DataLoader(dataset, batch_size=batch_size)
     run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
@@ -307,6 +313,8 @@ def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
                         ssim_loss_avg = 0
                         smooth_loss_avg = 0
                 for batch_id, ((x, keep_axials), y) in enumerate(loader):
+                    if is_ddp:
+                        dist.barrier()
                     # (torch.tensor(-100.), torch.tensor(-100))
                     # is returned when aborted
                     if (torch.eq(x, torch.tensor(-100.)).any() and
@@ -488,7 +496,7 @@ def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
                 state_dicts = [
                     OrderedDict({
                         k[7:]: v for k, v in model.state_dict().items()
-                    }) if is_ddp and not is_cpu else
+                    }) if is_ddp else
                     model.state_dict() for model in models]
                 torch.save(state_dicts[0] if len(models) == 1 else
                            state_dicts,
@@ -748,7 +756,8 @@ def detect_spots(config):
                                  is_3d=config.is_3d,
                                  zpath_input=config.zpath_input,
                                  crop_size=config.crop_size,
-                                 scales=config.scales)
+                                 scales=config.scales,
+                                 cache_maxbytes=config.cache_maxbytes)
         if len(img_input.shape) == 3 and config.use_2d:
             prediction = np.swapaxes(np.array([
                 _get_seg_prediction(img_input[z],
@@ -1096,7 +1105,8 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
 
 def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                     n_crops=0, zpath_input=None, crop_size=None, scales=None,
-                    url='Versatile', state_dicts=None, is_cpu=False):
+                    url='Versatile', state_dicts=None, is_cpu=False,
+                    cache_maxbytes=None):
     if state_dicts is None:
         state_dicts = [None, ] * n_models
         if url == 'Versatile':
@@ -1131,6 +1141,7 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
                         device, 1, crop_size, model_path, 1, keep_axials,
                         scales, lr, n_crops, is_3d, zpath_input,
                         log_interval=1, epoch_start=i, is_cpu=is_cpu,
+                        cache_maxbytes=cache_maxbytes,
                     )
 
 
@@ -1166,7 +1177,8 @@ def init_flow_models(model_path, device, is_3d=True, n_models=1,
 def load_seg_models(model_path, keep_axials, device, is_eval=False,
                     is_decoder_only=False, is_pad=False, is_3d=True,
                     n_models=1, n_crops=5, zpath_input=None, crop_size=None,
-                    scales=None, url='Versatile', is_cpu=False):
+                    scales=None, url='Versatile', is_cpu=False,
+                    cache_maxbytes=None):
     if not Path(model_path).exists():
         logger().info(
             f'Model file {model_path} not found. Start initialization...')
@@ -1181,7 +1193,8 @@ def load_seg_models(model_path, keep_axials, device, is_eval=False,
                             crop_size,
                             scales,
                             url=url,
-                            is_cpu=is_cpu)
+                            is_cpu=is_cpu,
+                            cache_maxbytes=cache_maxbytes)
         finally:
             gc.collect()
             torch.cuda.empty_cache()

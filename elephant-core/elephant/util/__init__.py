@@ -24,6 +24,9 @@
 # ==============================================================================
 """Exposing utility functions."""
 
+from collections import OrderedDict
+import sys
+
 import torch
 
 
@@ -60,3 +63,32 @@ def get_device():
         print("GPU is not available")
         device = torch.device("cpu")
     return device
+
+
+class LRUCacheDict:
+
+    def __init__(self, maxbytes=1024*1024):
+        """ Construct a LRUCacheDict with the cache size.
+
+        Args:
+            maxbytes (int): size of the memory capacity for cache in byte.
+        """
+        self.cache = OrderedDict()
+        self.maxbytes = maxbytes
+
+    def clear(self):
+        self.cache = OrderedDict()
+
+    def get(self, key, default=None):
+        if key not in self.cache:
+            if default is None:
+                return None
+            self.cache[key] = default
+        self.cache.move_to_end(key)
+        item = self.cache[key]
+        while self.maxbytes < self.size():
+            self.cache.popitem(0)
+        return item
+
+    def size(self):
+        return sum(sys.getsizeof(v) for v in self.cache.values())

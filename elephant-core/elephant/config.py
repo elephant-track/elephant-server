@@ -75,6 +75,7 @@ class BaseConfig():
         self.batch_size = config.get('batch_size', 1)
         self.patch_size = config.get('patch')
         self.log_interval = config.get('log_interval', 10)
+        self.cache_maxbytes = config.get('cache_maxbytes')
         if self.patch_size is not None:
             self.patch_size = self.patch_size[::-1]
         if config.get('scales') is not None:

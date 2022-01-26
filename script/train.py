@@ -50,6 +50,8 @@ from elephant.datasets import SegmentationDatasetZarr
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
 
+PROFILE = "ELEPHANT_PROFILE" in os.environ
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -118,6 +120,7 @@ def main():
                 contrast=config.contrast,
                 rotation_angle=config.rotation_angle,
                 length=train_length,
+                cache_maxbytes=config.cache_maxbytes,
             ))
             eval_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
@@ -130,6 +133,7 @@ def main():
                 is_eval=True,
                 length=eval_length,
                 adaptive_length=adaptive_length,
+                cache_maxbytes=config.cache_maxbytes,
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)
@@ -194,15 +198,22 @@ def main():
                 step_offset = max(step_offset, last+1)
             except Exception:
                 pass
-        world_size = 2 if config.is_cpu() else torch.cuda.device_count()
-        mp.spawn(run_train,
-                 args=(world_size, models, train_loader, optimizers, loss_fn,
-                       config.n_epochs, config.model_path, False,
-                       config.log_interval, config.log_dir, step_offset,
-                       config.epoch_start, eval_loader, config.patch_size,
-                       config.is_cpu(), True),
-                 nprocs=world_size,
-                 join=True)
+        if PROFILE:
+            run_train(config.device, 1, models, train_loader, optimizers,
+                      loss_fn, config.n_epochs, config.model_path, False,
+                      config.log_interval, config.log_dir, step_offset,
+                      config.epoch_start, eval_loader, config.patch_size,
+                      config.is_cpu(), True)
+        else:
+            world_size = 2 if config.is_cpu() else torch.cuda.device_count()
+            mp.spawn(run_train,
+                     args=(world_size, models, train_loader, optimizers,
+                           loss_fn, config.n_epochs, config.model_path, False,
+                           config.log_interval, config.log_dir, step_offset,
+                           config.epoch_start, eval_loader, config.patch_size,
+                           config.is_cpu(), True),
+                     nprocs=world_size,
+                     join=True)
 
 
 def load_models(config, command):

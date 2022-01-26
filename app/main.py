@@ -55,7 +55,6 @@ from elephant.common import detect_spots
 from elephant.common import export_ctc_labels
 from elephant.common import init_flow_models
 from elephant.common import init_seg_models
-from elephant.common import load_flow_models
 from elephant.common import spots_with_flow
 from elephant.common import run_train_seg
 from elephant.common import run_train_flow
@@ -119,7 +118,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    lr, n_crops, is_3d, is_livemode, scale_factor_base,
                    rotation_angle, zpath_input, zpath_seg_label, log_interval,
                    log_dir, step_offset=0, epoch_start=0, is_cpu=False,
-                   is_mixed_precision=True):
+                   is_mixed_precision=True, cache_maxbytes=None):
     if not torch.cuda.is_available():
         is_cpu = False
     world_size = 2 if is_cpu else torch.cuda.device_count()
@@ -129,7 +128,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    keep_axials, scales, lr, n_crops, is_3d, is_livemode,
                    scale_factor_base, rotation_angle, zpath_input,
                    zpath_seg_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision),
+                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes),
              nprocs=world_size,
              join=True)
 
@@ -139,7 +138,7 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                     keep_axials, scales, lr, n_crops, is_3d, scale_factor_base,
                     rotation_angle, zpath_input, zpath_flow_label,
                     log_interval, log_dir, step_offset=0, epoch_start=0,
-                    is_cpu=False, is_mixed_precision=True):
+                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None):
     if not torch.cuda.is_available():
         is_cpu = False
     world_size = 2 if is_cpu else torch.cuda.device_count()
@@ -148,7 +147,7 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                    n_epochs, keep_axials, scales, lr, n_crops, is_3d,
                    scale_factor_base, rotation_angle, zpath_input,
                    zpath_flow_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision),
+                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes),
              nprocs=world_size,
              join=True)
 
@@ -248,6 +247,7 @@ def _update_flow_labels(spots_dict,
     n_dims = len(za_label.shape) - 2
     for t, spots in spots_dict.items():
         label = np.zeros(za_label.shape[1:], dtype='float32')
+        label_indices = set()
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
                 logger().info('aborted')
@@ -273,7 +273,11 @@ def _update_flow_labels(spots_dict,
                 label[i][indices] = (
                     displacement[i] / scales[-1 - i] / flow_norm_factor[i])
             label[-1][indices] = weight  # last channels is for weight
+            label_indices.update(
+                tuple(map(tuple, np.stack(indices, axis=1).tolist())))
         logger().info(f'frame:{t+1}, {len(spots)} linkings')
+        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
+        za_label.attrs['updated'] = True
         za_label[t] = label
     return jsonify({'completed': True})
 
@@ -358,9 +362,6 @@ def train_flow():
             return jsonify(error=msg), 400
         spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
-        models = load_flow_models(config.model_path,
-                                  config.device,
-                                  is_3d=config.is_3d)
         if int(redis_client.get(REDIS_KEY_STATE)) != TrainState.IDLE.value:
             msg = 'Process is running'
             logger().error(msg)
@@ -378,7 +379,7 @@ def train_flow():
                 step_offset = max(step_offset, last+1)
             except Exception:
                 pass
-            epoch_start = 0
+        epoch_start = 0
         train_flow_task.delay(
             list(spots_dict.keys()), config.batch_size, config.crop_size,
             config.model_path, config.n_epochs, config.keep_axials,
@@ -386,7 +387,7 @@ def train_flow():
             config.scale_factor_base, config.rotation_angle,
             config.zpath_input, config.zpath_flow_label,
             config.log_interval, config.log_dir, step_offset, epoch_start,
-            config.is_cpu(), config.is_mixed_precision,
+            config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
         ).wait()
         if (int(redis_client.get(REDIS_KEY_STATE)) ==
                 TrainState.IDLE.value):
@@ -399,7 +400,6 @@ def train_flow():
         logger().exception('Failed in train_flow')
         return jsonify(error=f'Exception: {e}'), 500
     finally:
-        del models
         gc.collect()
         torch.cuda.empty_cache()
         redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
@@ -532,14 +532,20 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     za_label_vis = zarr.open(zpath_seg_label_vis, mode='a')
     keyorder = ['tp', 'fp', 'tn', 'fn', 'tb', 'fb']
     MIN_AREA_ELLIPSOID = 9
-    n_dims = len(za_input.shape) - 1
+    img_shape = za_input.shape[1:]
+    n_dims = len(img_shape)
     for t, spots in spots_dict.items():
-        # label = np.zeros(label_shape, dtype='int64') - 1
-        label = np.where(
-            normalize_zero_one(za_input[t].astype('float32')) < auto_bg_thresh,
-            1,
-            0
-        ).astype('uint8')
+        label_indices = set()
+        if 0 < auto_bg_thresh:
+            label = np.where(
+                normalize_zero_one(za_input[t].astype(
+                    'float32')) < auto_bg_thresh,
+                1,
+                0
+            ).astype('uint8')
+        else:
+            label = np.zeros(img_shape, dtype='uint8')
+        label_vis = np.zeros(img_shape + (3,), dtype='uint8')
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
@@ -566,7 +572,15 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 label.shape,
                 MIN_AREA_ELLIPSOID
             )
-            label_offset = 0 if spot['tag'] in ['tp', 'tb', 'tn'] else 3
+            label_indices.update(
+                tuple(map(tuple, np.stack(indices_outer, axis=1).tolist())))
+            if spot['tag'] in ['tp', 'tb', 'tn']:
+                label_offset = 0
+                label_vis_value = 255
+            else:
+                label_offset = 3
+                label_vis_value = 127
+            cond_outer_1 = np.fmod(label[indices_outer] - 1, 3) <= 1
             if spot['tag'] in ('tp', 'fn'):
                 indices_inner = draw_func(
                     centroid,
@@ -578,37 +592,57 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 )
                 indices_inner_p = dilate_func(*indices_inner, label.shape)
                 label[indices_outer] = np.where(
-                    np.fmod(label[indices_outer] - 1, 3) <= 1,
+                    cond_outer_1,
                     2 + label_offset,
                     label[indices_outer]
                 )
+                label_vis[..., 1][indices_outer] = np.where(
+                    cond_outer_1,
+                    label_vis_value,
+                    label_vis[..., 1][indices_outer]
+                )
                 label[indices_inner_p] = 2 + label_offset
+                label_vis[..., 1][indices_inner_p] = label_vis_value
+                cond_inner = np.fmod(label[indices_inner] - 1, 3) <= 2
                 label[indices_inner] = np.where(
-                    np.fmod(label[indices_inner] - 1, 3) <= 2,
+                    cond_inner,
                     3 + label_offset,
                     label[indices_inner]
                 )
+                label_vis[..., 2][indices_inner] = np.where(
+                    cond_inner,
+                    label_vis_value,
+                    label_vis[..., 2][indices_inner]
+                )
             elif spot['tag'] in ('tb', 'fb'):
                 label[indices_outer] = np.where(
-                    np.fmod(label[indices_outer] - 1, 3) <= 1,
+                    cond_outer_1,
                     2 + label_offset,
                     label[indices_outer]
                 )
+                label_vis[..., 1][indices_outer] = np.where(
+                    cond_outer_1,
+                    label_vis_value,
+                    label_vis[..., 1][indices_outer]
+                )
             elif spot['tag'] in ('tn', 'fp'):
+                cond_outer_0 = np.fmod(label[indices_outer] - 1, 3) <= 0
                 label[indices_outer] = np.where(
-                    np.fmod(label[indices_outer] - 1, 3) <= 0,
+                    cond_outer_0,
                     1 + label_offset,
                     label[indices_outer]
                 )
+                label_vis[..., 0][indices_outer] = np.where(
+                    cond_outer_0,
+                    label_vis_value,
+                    label_vis[..., 0][indices_outer]
+                )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
+        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
+        za_label.attrs['updated'] = True
         za_label[t] = label
-        za_label_vis[t, ..., 0] = np.where(
-            label == 1, 255, 0) + np.where(label == 4, 127, 0)
-        za_label_vis[t, ..., 1] = np.where(
-            label == 2, 255, 0) + np.where(label == 5, 127, 0)
-        za_label_vis[t, ..., 2] = np.where(
-            label == 3, 255, 0) + np.where(label == 6, 127, 0)
+        za_label_vis[t] = label_vis
         if is_livemode:
             if redis_client.get(REDIS_KEY_TIMEPOINT):
                 msg = 'Last update/training is ongoing'
@@ -755,7 +789,7 @@ def train_seg():
             config.scale_factor_base, config.rotation_angle,
             config.zpath_input, config.zpath_seg_label,
             config.log_interval, config.log_dir, step_offset, epoch_start,
-            config.is_cpu(), config.is_mixed_precision,
+            config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
         ).wait()
         if (int(redis_client.get(REDIS_KEY_STATE)) ==
                 TrainState.IDLE.value):
@@ -845,7 +879,8 @@ def reset_seg_models():
                         config.scales,
                         url=config.url,
                         state_dicts=state_dicts,
-                        is_cpu=config.is_cpu())
+                        is_cpu=config.is_cpu(),
+                        cache_maxbytes=config.cache_maxbytes)
     except RuntimeError as e:
         logger().exception('Failed in init_seg_models')
         return jsonify(error=f'Runtime Error: {e}'), 500

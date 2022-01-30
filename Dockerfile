@@ -37,8 +37,6 @@ ENV RABBITMQ_PID_FILE /var/lib/rabbitmq/mnesia/rabbitmq.pid
 COPY docker/rabbitmq.sh /rabbitmq.sh
 RUN chmod +x /rabbitmq.sh
 
-RUN conda install celery matplotlib
-
 # Set up nginx
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80 443

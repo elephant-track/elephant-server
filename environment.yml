@@ -12,6 +12,7 @@ dependencies:
   - absl-py=0.15.0=pyhd3eb1b0_0
   - aiohttp=3.8.1=py37h7f8727e_0
   - aiosignal=1.2.0=pyhd3eb1b0_0
+  - amqp=2.6.1=py_0
   - asciitree=0.3.3=py_2
   - astor=0.8.1=py37h06a4308_0
   - astunparse=1.6.3=py_0
@@ -20,6 +21,7 @@ dependencies:
   - attrs=21.2.0=pyhd3eb1b0_0
   - backcall=0.2.0=pyhd3eb1b0_0
   - beautifulsoup4=4.10.0=pyh06a4308_0
+  - billiard=3.6.4.0=py37h27cfd23_0
   - blas=1.0=mkl
   - blinker=1.4=py37h06a4308_0
   - blosc=1.21.0=h9c3ff4c_0
@@ -30,12 +32,16 @@ dependencies:
   - c-ares=1.18.1=h7f98852_0
   - ca-certificates=2021.10.26=h06a4308_2
   - cachetools=4.2.2=pyhd3eb1b0_0
-  - certifi=2021.10.8=py37h89c1867_1
+  - celery=5.0.5=pyhd3eb1b0_0
+  - certifi=2021.10.8=py37h06a4308_2
   - cffi=1.14.6=py37h400218f_0
   - chardet=4.0.0=py37h06a4308_1003
   - charls=2.2.0=h2531618_0
   - charset-normalizer=2.0.4=pyhd3eb1b0_0
   - click=8.0.3=pyhd3eb1b0_0
+  - click-didyoumean=0.0.3=pyhd3eb1b0_0
+  - click-plugins=1.1.1=pyhd3eb1b0_0
+  - click-repl=0.2.0=pyhd3eb1b0_0
   - cloudpickle=2.0.0=pyhd3eb1b0_0
   - conda=4.11.0=py37h89c1867_0
   - conda-build=3.21.5=py37h06a4308_0
@@ -58,6 +64,7 @@ dependencies:
   - freetype=2.10.4=h5ab3b9f_0
   - frozenlist=1.2.0=py37h7f8727e_0
   - fsspec=2021.10.1=pyhd3eb1b0_0
+  - future=0.18.2=py37_1
   - gast=0.3.3=py_0
   - giflib=5.2.1=h7b6447c_0
   - glob2=0.7=pyhd3eb1b0_0
@@ -66,6 +73,7 @@ dependencies:
   - google-auth=1.33.0=pyhd3eb1b0_0
   - google-auth-oauthlib=0.4.4=pyhd3eb1b0_0
   - google-pasta=0.2.0=pyhd3eb1b0_0
+  - greenlet=1.1.1=py37h295c915_0
   - grpc-cpp=1.36.4=hf89561c_1
   - grpcio=1.36.1=py37h2157cd5_1
   - h5py=2.10.0=py37hd6299e0_1
@@ -75,6 +83,7 @@ dependencies:
   - imagecodecs=2021.3.31=py37hd0c323f_1
   - imageio=2.9.0=pyhd3eb1b0_0
   - importlib-metadata=4.8.2=py37h06a4308_0
+  - importlib_metadata=4.8.2=hd3eb1b0_0
   - intel-openmp=2021.3.0=h06a4308_3350
   - ipython=7.27.0=py37hb070fc8_0
   - itsdangerous=2.0.1=pyhd3eb1b0_0
@@ -87,6 +96,7 @@ dependencies:
   - jxrlib=1.1=h7b6447c_2
   - keras-preprocessing=1.1.2=pyhd3eb1b0_0
   - kiwisolver=1.3.1=py37h2531618_0
+  - kombu=4.6.11=py37_0
   - krb5=1.19.2=hcc1bbae_0
   - lame=3.100=h7b6447c_0
   - lcms2=2.12=h3be6417_0
@@ -147,7 +157,7 @@ dependencies:
   - olefile=0.46=py37_0
   - openh264=2.1.0=hd408876_0
   - openjpeg=2.4.0=h3ad879b_0
-  - openssl=1.1.1l=h7f98852_0
+  - openssl=1.1.1m=h7f8727e_0
   - opt_einsum=3.3.0=pyhd3eb1b0_1
   - packaging=21.3=pyhd3eb1b0_0
   - parso=0.8.2=pyhd3eb1b0_0
@@ -161,6 +171,7 @@ dependencies:
   - pip=21.0.1=py37h06a4308_0
   - pkginfo=1.7.1=py37h06a4308_0
   - prompt-toolkit=3.0.20=pyhd3eb1b0_0
+  - prompt_toolkit=3.0.20=hd3eb1b0_0
   - protobuf=3.15.8=py37hcd2ae1e_0
   - psutil=5.8.0=py37h27cfd23_1
   - ptyprocess=0.7.0=pyhd3eb1b0_2
@@ -202,6 +213,7 @@ dependencies:
   - six=1.16.0=pyhd3eb1b0_0
   - snappy=1.1.8=he6710b0_0
   - soupsieve=2.2.1=pyhd3eb1b0_0
+  - sqlalchemy=1.4.27=py37h7f8727e_0
   - sqlite=3.36.0=hc218d9a_0
   - tensorboard=2.4.0=pyhc547734_0
   - tensorboard-plugin-wit=1.6.0=py_0
@@ -224,6 +236,7 @@ dependencies:
   - tzdata=2021a=h52ac0ba_0
   - urllib3=1.26.6=pyhd3eb1b0_1
   - uwsgi=2.0.18=py37hd004684_2
+  - vine=1.3.0=pyhd3eb1b0_0
   - wcwidth=0.2.5=pyhd3eb1b0_0
   - werkzeug=2.0.2=pyhd3eb1b0_0
   - wheel=0.36.2=pyhd3eb1b0_0

@@ -26,6 +26,7 @@
 
 import math
 import os
+from pathlib import Path
 from random import uniform
 from random import randint
 from random import randrange
@@ -38,15 +39,16 @@ import torch.utils.data as du
 if os.environ.get('CTC') != '1':
     import zarr
 
+from elephant.logging import logger
 from elephant.util import LRUCacheDict
 from elephant.util import normalize_zero_one
+from elephant.util import RUN_ON_FLASK
+from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
 
-
-RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 PROFILE = "ELEPHANT_PROFILE" in os.environ
 
 if not PROFILE:
@@ -54,12 +56,77 @@ if not PROFILE:
         return func
 
 
+def _load_image(za_input, timepoint, use_median=False):
+    img = za_input[timepoint].astype('float32')
+    if use_median and img.ndim == 3:
+        global_median = np.median(img)
+        for z in range(img.shape[0]):
+            slice_median = np.median(img[z])
+            if 0 < slice_median:
+                img[z] -= slice_median - global_median
+    return normalize_zero_one(img)
+
+
+def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
+    if memmap_dir:
+        key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
+        fpath = Path(memmap_dir) / f'{key}.dat'
+        logger().info(f'loading from {fpath}')
+        if not fpath.exists():
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            img = _load_image(za, timepoint, use_median)
+            np.memmap(fpath, dtype='float32', mode='w+',
+                      shape=za.shape[1:])[:] = img
+        return np.memmap(fpath, dtype='float32', mode='c',
+                         shape=za.shape[1:])
+    return _load_image(za, timepoint, use_median)
+
+
+def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
+                 use_median=False):
+    if cache_dict:
+        key = f'{za_input.store.path}-t{timepoint}-{use_median}'
+        cache = cache_dict.get(key)
+        if cache is None:
+            cache = cache_dict.get(
+                key,
+                _get_memmap_or_load(za_input, timepoint, memmap_dir,
+                                    use_median)
+            )
+        return cache
+    return _get_memmap_or_load(za_input, timepoint, memmap_dir, use_median)
+
+
+class SegmentationDatasetPrediction(du.Dataset):
+    def __init__(self, input, patch_list, keep_axials):
+        """
+        input: 5D tensor
+        """
+        self.input = input
+        self.patch_list = patch_list
+        self.keep_axials = keep_axials
+
+    def __len__(self):
+        return len(self.input) * len(self.patch_list)
+
+    def __getitem__(self, index):
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
+            raise KeyboardInterrupt
+        data_ind = index // len(self.patch_list)
+        patch_ind = index % len(self.patch_list)
+        slices, _ = self.patch_list[patch_ind]
+        return (self.input[data_ind][slices],
+                self.keep_axials[data_ind], data_ind, patch_ind)
+
+
 class SegmentationDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_seg_label, indices, img_size,
                  crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
-                 is_livemode=False, redis_client=None, scale_factor_base=0.2,
-                 is_ae=False, rotation_angle=None, contrast=0.5, is_eval=False,
-                 length=None, adaptive_length=False, cache_maxbytes=None):
+                 is_livemode=False, scale_factor_base=0.2, is_ae=False,
+                 rotation_angle=None, contrast=0.5, is_eval=False, length=None,
+                 adaptive_length=False, cache_maxbytes=None, memmap_dir=None):
         """Generate dataset for segmentation.
 
         Args:
@@ -76,7 +143,6 @@ class SegmentationDatasetZarr(du.Dataset):
                 physical unit (e.g. 0.5 μm/px). This is used to calculate scale
                 factors for augmentation.
             is_livemode(boolean): True if training is performed in live mode.
-            redis_client(FlaskRedis): FlaskRedis object, required in live mode.
             scale_factor_base(float): a base scale factor for augmentation.
             is_ae(boolean): True if called from a prior training.
             rotation_angle(float): rotation angle for augmentation in degree.
@@ -90,6 +156,7 @@ class SegmentationDatasetZarr(du.Dataset):
                 and the len(indices) * self.n_crops is 6, the length becomes 6
                 if adaptive_length is true, while it remains 10 if false.
             cache_maxbytes (int): size of the memory capacity for cache in byte.
+            memmap_dir (str): path to a directory for storing memmap files.
         """
         if len(img_size) != len(crop_size):
             raise ValueError(
@@ -139,14 +206,13 @@ class SegmentationDatasetZarr(du.Dataset):
             if self.is_livemode:
                 assert redis_client is not None
                 redis_client.set(REDIS_KEY_NCROPS, str(n_crops))
-                self.redis_c = redis_client
             if (adaptive_length and (length is not None) and
                     (len(indices) * self.n_crops <= length)):
                 length = None
         self.rotation_angle = rotation_angle
         self.contrast = contrast
         if self.is_livemode:
-            self.length = int(self.redis_c.get(REDIS_KEY_NCROPS))
+            self.length = int(redis_client.get(REDIS_KEY_NCROPS))
         else:
             self.length = length
         self.keep_axials = torch.tensor(keep_axials)
@@ -156,6 +222,7 @@ class SegmentationDatasetZarr(du.Dataset):
             self.cache_dict_label = LRUCacheDict(cache_maxbytes // 2)
         else:
             self.use_cache = False
+        self.memmap_dir = memmap_dir
 
     def __len__(self):
         if self.length is not None:
@@ -163,18 +230,6 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.is_ae:
             return self.n_crops
         return len(self.indices) * self.n_crops
-
-    def _get_input_at(self, ind):
-        if self.use_cache:
-            key = f'{self.za_input.store.path}:{ind}'
-            cache = self.cache_dict_input.get(key)
-            if cache is None:
-                cache = self.cache_dict_input.get(
-                    key,
-                    normalize_zero_one(self.za_input[ind].astype('float32'))
-                )
-            return cache
-        return normalize_zero_one(self.za_input[ind].astype('float32'))
 
     def _get_label_at(self, ind):
         if self.use_cache:
@@ -193,7 +248,6 @@ class SegmentationDatasetZarr(du.Dataset):
         )
         return label
 
-    @profile
     def __getitem__(self, index):
         """
         Input shape: ((D,) H, W)
@@ -201,6 +255,10 @@ class SegmentationDatasetZarr(du.Dataset):
         Label values: 0: unlabeled, 1: BG (LW), 2: Outer (LW), 3: Inner (LW)
                                     4: BG (HW), 5: Outer (HW), 6: Inner (HW)
         """
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
+            raise KeyboardInterrupt
         if self.is_ae:
             i_frame = randrange(self.za_input.shape[0])
         else:
@@ -213,16 +271,15 @@ class SegmentationDatasetZarr(du.Dataset):
                     za_label_a.attrs['updated'] = False
             if self.is_livemode:
                 while True:
-                    v = self.redis_c.get(REDIS_KEY_TIMEPOINT)
+                    v = redis_client.get(REDIS_KEY_TIMEPOINT)
                     if v is not None:
                         i_frame = int(v)
                         img_label = self._get_label_at(i_frame)
                         break
-                    if (int(self.redis_c.get(REDIS_KEY_STATE)) ==
+                    if (int(redis_client.get(REDIS_KEY_STATE)) ==
                             TrainState.IDLE.value):
-                        return ((torch.tensor(-100.), self.keep_axials),
-                                torch.tensor(-100))
-                    if self.length != int(self.redis_c.get(REDIS_KEY_NCROPS)):
+                        raise KeyboardInterrupt
+                    if self.length != int(redis_client.get(REDIS_KEY_NCROPS)):
                         return ((torch.tensor(-200.), self.keep_axials),
                                 torch.tensor(-200))
             else:
@@ -231,110 +288,138 @@ class SegmentationDatasetZarr(du.Dataset):
                 else:
                     i_frame = self.indices[index // self.n_crops]
                 img_label = self._get_label_at(i_frame)
-        img_input = self._get_input_at(i_frame)
+        img_input = get_input_at(self.za_input, i_frame, self.cache_dict_input,
+                                 self.memmap_dir)
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input[None])
             tensor_label = torch.from_numpy(img_label).long()
             return (tensor_input, self.keep_axials), tensor_label - 1
 
-        if 0 < sum(self.scale_factors):
-            item_crop_size = [
-                randrange(
-                    min(
-                        img_input.shape[i],
-                        round(self.crop_size[i] * (1. - self.scale_factors[i]))
-                    ),
-                    min(
-                        img_input.shape[i] + 1,
-                        int(self.crop_size[i] *
-                            (1. + self.scale_factors[i])) + 1
-                    )
-                ) for i in range(self.n_dims)
-            ]
-        else:
-            item_crop_size = self.crop_size
-        if not self.is_ae:
-            index_pool = self.za_label.attrs.get(f'label.indices.{i_frame}')
-            if index_pool is None:
-                index_pool = np.argwhere(0 < img_label)
-                self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
-                    map(tuple, index_pool.tolist())
-                )
-        if self.is_ae:
-            origins = [
-                randint(0, img_input.shape[i] - item_crop_size[i])
-                for i in range(self.n_dims)
-            ]
-        else:
-            base_index = index_pool[randrange(len(index_pool))]
-            origins = [
-                randint(
-                    max(0,
-                        base_index[i] - (item_crop_size[i] - 1)),
-                    min(img_input.shape[i] - item_crop_size[i],
-                        base_index[i])
-                )
-                for i in range(self.n_dims)
-            ]
-        slices = tuple(
-            slice(origins[i], origins[i] + item_crop_size[i])
-            for i in range(self.n_dims)
-        )
-        if not self.is_ae:
-            sliced_label = img_label[slices].copy()
-
-        sliced_input = img_input[slices].copy()
-
-        if not self.is_ae and self.contrast:
-            fg_index = np.isin(sliced_label, (1, 2, 4, 5))
-            bg_index = np.isin(sliced_label, (0, 3))
-            if fg_index.any() and bg_index.any():
-                fg_mean = sliced_input[fg_index].mean()
-                bg_mean = sliced_input[bg_index].mean()
-                cr_factor = (((fg_mean - bg_mean) * uniform(0.5, 1) + bg_mean)
-                             / fg_mean)
-                sliced_input[fg_index] *= cr_factor
-
-        if self.rotation_angle is not None and 0 < self.rotation_angle:
-            # rotate image
-            theta = randint(-self.rotation_angle, self.rotation_angle)
-            if self.n_dims == 3:
-                sliced_input = np.array([
-                    rotate(
-                        sliced_input[z],
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=1,  # 1: Bi-linear (default)
-                    ) for z in range(sliced_input.shape[0])
-                ])
+        while True:
+            if 0 < sum(self.scale_factors):
+                item_crop_size = [
+                    randrange(
+                        min(
+                            img_input.shape[i],
+                            round(self.crop_size[i] *
+                                  (1. - self.scale_factors[i]))
+                        ),
+                        min(
+                            img_input.shape[i] + 1,
+                            int(self.crop_size[i] *
+                                (1. + self.scale_factors[i])) + 1
+                        )
+                    ) for i in range(self.n_dims)
+                ]
             else:
-                sliced_input = rotate(sliced_input,
-                                      theta,
-                                      resize=True,
-                                      preserve_range=True,
-                                      order=1,  # 1: Bi-linear (default)
-                                      )
-
-            # rotate label
+                item_crop_size = self.crop_size
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
+                # rotate image
+                theta = randint(-self.rotation_angle, self.rotation_angle)
+                cos_theta = math.cos(math.radians(theta))
+                sin_theta = math.sin(math.radians(theta))
+                for i in (-2, -1):
+                    item_crop_size[i] *= (abs(cos_theta) + abs(sin_theta))
+                    item_crop_size[i] = math.ceil(item_crop_size[i])
+                item_crop_size = [min(img_input.shape[i], item_crop_size[i])
+                                  for i in range(self.n_dims)]
             if not self.is_ae:
+                index_pool = self.za_label.attrs.get(
+                    f'label.indices.{i_frame}')
+                if index_pool is None:
+                    index_pool = np.argwhere(0 < img_label)
+                    self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
+                        map(tuple, index_pool.tolist())
+                    )
+            if self.is_ae:
+                origins = [
+                    randint(0, img_input.shape[i] - item_crop_size[i])
+                    for i in range(self.n_dims)
+                ]
+            else:
+                base_index = index_pool[randrange(len(index_pool))]
+                origins = [
+                    randint(
+                        max(0,
+                            base_index[i] - (item_crop_size[i] - 1)),
+                        min(img_input.shape[i] - item_crop_size[i],
+                            base_index[i])
+                    )
+                    for i in range(self.n_dims)
+                ]
+            slices = tuple(
+                slice(origins[i], origins[i] + item_crop_size[i])
+                for i in range(self.n_dims)
+            )
+            if not self.is_ae:
+                sliced_label = img_label[slices].copy()
+
+            sliced_input = img_input[slices].copy()
+
+            if not self.is_ae and self.contrast:
+                fg_index = np.isin(sliced_label, (1, 2, 4, 5))
+                bg_index = np.isin(sliced_label, (0, 3))
+                if fg_index.any() and bg_index.any():
+                    fg_mean = sliced_input[fg_index].mean()
+                    bg_mean = sliced_input[bg_index].mean()
+                    cr_factor = (
+                        ((fg_mean - bg_mean) * uniform(0.5, 1) + bg_mean)
+                        / fg_mean
+                    )
+                    sliced_input[fg_index] *= cr_factor
+
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
                 if self.n_dims == 3:
-                    sliced_label = np.array([
+                    sliced_input = np.array([
                         rotate(
-                            sliced_label[z],
+                            sliced_input[z],
                             theta,
                             resize=True,
                             preserve_range=True,
-                            order=0,  # 0: Nearest-neighbor
-                        ) for z in range(sliced_label.shape[0])
+                            order=1,  # 1: Bi-linear (default)
+                        ) for z in range(sliced_input.shape[0])
                     ])
                 else:
-                    sliced_label = rotate(sliced_label,
+                    sliced_input = rotate(sliced_input,
                                           theta,
                                           resize=True,
                                           preserve_range=True,
-                                          order=0,  # 0: Nearest-neighbor
+                                          order=1,  # 1: Bi-linear (default)
                                           )
+                h_crop, w_crop = self.crop_size[-2:]
+                h_rotate, w_rotate = sliced_input.shape[-2:]
+                r_origin = max(0, (h_rotate - h_crop) // 2)
+                c_origin = max(0, (w_rotate - w_crop) // 2)
+                sliced_input = sliced_input[...,
+                                            r_origin:r_origin+h_crop,
+                                            c_origin:c_origin+w_crop]
+
+                # rotate label
+                if not self.is_ae:
+                    if self.n_dims == 3:
+                        sliced_label = np.array([
+                            rotate(
+                                sliced_label[z],
+                                theta,
+                                resize=True,
+                                preserve_range=True,
+                                order=0,  # 0: Nearest-neighbor
+                            ) for z in range(sliced_label.shape[0])
+                        ])
+                    else:
+                        sliced_label = rotate(sliced_label,
+                                              theta,
+                                              resize=True,
+                                              preserve_range=True,
+                                              order=0,  # 0: Nearest-neighbor
+                                              )
+                    sliced_label = sliced_label[...,
+                                                r_origin:r_origin+h_crop,
+                                                c_origin:c_origin+w_crop]
+                    if sliced_label.max() == 0:
+                        continue
+            break
+
         tensor_input = torch.from_numpy(sliced_input)[None]
         if not self.is_ae:
             tensor_label = torch.from_numpy(sliced_label)
@@ -365,7 +450,7 @@ class SegmentationDatasetZarr(du.Dataset):
 class AutoencoderDatasetZarr(SegmentationDatasetZarr):
     def __init__(self, zpath_input, img_size, crop_size, n_crops,
                  keep_axials=(True,) * 4, scales=None, scale_factor_base=0.2,
-                 cache_maxbytes=None):
+                 cache_maxbytes=None, memmap_dir=None):
         """Generate dataset for self-supervised training for segmentation.
 
         Args:
@@ -380,6 +465,7 @@ class AutoencoderDatasetZarr(SegmentationDatasetZarr):
                 physical unit (e.g. 0.5 μm/px). This is used to calculate scale
                 factors for augmentation.
             cache_maxbytes (int): size of the memory capacity for cache in byte.
+            memmap_dir (str): path to a directory for storing memmap files.
         """
         super().__init__(zpath_input,
                          None,
@@ -391,14 +477,16 @@ class AutoencoderDatasetZarr(SegmentationDatasetZarr):
                          scales=scales,
                          scale_factor_base=scale_factor_base,
                          is_ae=True,
-                         cache_maxbytes=cache_maxbytes)
+                         cache_maxbytes=cache_maxbytes,
+                         memmap_dir=memmap_dir)
 
 
 class FlowDatasetZarr(du.Dataset):
     def __init__(self, zpath_input, zpath_flow_label, indices, img_size,
                  crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
                  scale_factor_base=0.2, rotation_angle=None, is_eval=False,
-                 length=None, adaptive_length=False, cache_maxbytes=None):
+                 length=None, adaptive_length=False, cache_maxbytes=None,
+                 memmap_dir=None):
         """Generate dataset for flow estimation.
 
         Args:
@@ -424,6 +512,7 @@ class FlowDatasetZarr(du.Dataset):
                 and the len(indices) * self.n_crops is 6, the length becomes 6
                 if adaptive_length is true, while it remains 10 if false.
             cache_maxbytes (int): size of the memory capacity for cache in byte.
+            memmap_dir (str): path to a directory for storing memmap files.
         """
         if len(img_size) != len(crop_size):
             raise ValueError(
@@ -475,32 +564,29 @@ class FlowDatasetZarr(du.Dataset):
             self.cache_dict_label = LRUCacheDict(cache_maxbytes // 2)
         else:
             self.use_cache = False
+        self.memmap_dir = memmap_dir
 
     def __len__(self):
         if self.length is not None:
             return self.length
         return len(self.indices) * self.n_crops
 
-    def _get_input_at(self, ind):
-        if self.use_cache:
-            key = f'{self.za_input.store.path}:{ind}'
-            cache = self.cache_dict_input.get(key)
-            if cache is None:
-                cache = self.cache_dict_input.get(
-                    key,
-                    normalize_zero_one(self.za_input[ind].astype('float32'))
-                )
-            return cache
-        return normalize_zero_one(self.za_input[ind].astype('float32'))
-
     def _get_inputs_at(self, ind):
         if self.use_cache:
             key = f'{self.za_input.store.path}:{ind}-{ind+1}'
             cache = self.cache_dict_input.get(key)
             if cache is None:
-                cache = np.array([self._get_input_at(i) for i in (ind, ind+1)])
+                cache = np.array([get_input_at(self.za_input,
+                                               i,
+                                               self.cache_dict_input,
+                                               self.memmap_dir)
+                                  for i in (ind, ind+1)])
             return cache
-        return np.array([self._get_input_at(i) for i in (ind, ind+1)])
+        return np.array([get_input_at(self.za_input,
+                                      i,
+                                      self.cache_dict_input,
+                                      self.memmap_dir)
+                         for i in (ind, ind+1)])
 
     def _get_label_at(self, ind):
         if self.use_cache:
@@ -519,13 +605,16 @@ class FlowDatasetZarr(du.Dataset):
         )
         return label
 
-    @profile
     def __getitem__(self, index):
         """
         Input shape: (2, (D,) H, W)
         Label shape: (ndim+1, (D,) H, W)
         Label channels: (flow_x, flow_y, flow_z, mask)
         """
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
+            raise KeyboardInterrupt
         if RUN_ON_FLASK and self.use_cache:
             za_label_a = zarr.open(self.zpath_flow_label, mode='a')
             if za_label_a.attrs.get('updated', False):
@@ -543,108 +632,132 @@ class FlowDatasetZarr(du.Dataset):
             tensor_target = torch.cat((tensor_label, tensor_input), )
             return (tensor_input, self.keep_axials), tensor_target
 
-        if 0 < sum(self.scale_factors):
-            item_crop_size = [
-                randrange(
-                    min(
-                        img_input.shape[i + 1],
-                        round(self.crop_size[i] * (1. - self.scale_factors[i]))
-                    ),
-                    min(
-                        img_input.shape[i + 1] + 1,
-                        int(self.crop_size[i] *
-                            (1. + self.scale_factors[i])) + 1
-                    )
-                ) for i in range(self.n_dims)
+        while True:
+            if 0 < sum(self.scale_factors):
+                item_crop_size = [
+                    randrange(
+                        min(
+                            img_input.shape[i + 1],
+                            round(self.crop_size[i] *
+                                  (1. - self.scale_factors[i]))
+                        ),
+                        min(
+                            img_input.shape[i + 1] + 1,
+                            int(self.crop_size[i] *
+                                (1. + self.scale_factors[i])) + 1
+                        )
+                    ) for i in range(self.n_dims)
+                ]
+            else:
+                item_crop_size = self.crop_size
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
+                # rotate image
+                theta = randint(-self.rotation_angle, self.rotation_angle)
+                cos_theta = math.cos(math.radians(theta))
+                sin_theta = math.sin(math.radians(theta))
+                for i in (-2, -1):
+                    item_crop_size[i] *= (abs(cos_theta) + abs(sin_theta))
+                    item_crop_size[i] = math.ceil(item_crop_size[i])
+                item_crop_size = [min(img_input.shape[i], item_crop_size[i])
+                                  for i in range(self.n_dims)]
+            index_pool = self.za_label.attrs.get(f'label.indices.{i_frame}')
+            if index_pool is None:
+                index_pool = np.argwhere(0 < img_label[-1])
+                self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
+                    map(tuple, index_pool.tolist())
+                )
+            base_index = index_pool[randrange(len(index_pool))]
+            origins = [
+                randint(
+                    max(0,
+                        base_index[i] - (item_crop_size[i] - 1)),
+                    min(img_input.shape[i + 1] - item_crop_size[i],
+                        base_index[i])
+                )
+                for i in range(self.n_dims)
             ]
-        else:
-            item_crop_size = self.crop_size
-        index_pool = self.za_label.attrs.get(f'label.indices.{i_frame}')
-        if index_pool is None:
-            index_pool = np.argwhere(0 < img_label[-1])
-            self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
-                map(tuple, index_pool.tolist())
+            slices = (slice(None),) + tuple(
+                slice(origins[i], origins[i] + item_crop_size[i])
+                for i in range(self.n_dims)
             )
-        base_index = index_pool[randrange(len(index_pool))]
-        origins = [
-            randint(
-                max(0,
-                    base_index[i] - (item_crop_size[i] - 1)),
-                min(img_input.shape[i + 1] - item_crop_size[i],
-                    base_index[i])
-            )
-            for i in range(self.n_dims)
-        ]
-        slices = (slice(None),) + tuple(
-            slice(origins[i], origins[i] + item_crop_size[i])
-            for i in range(self.n_dims)
-        )
-        sliced_label = img_label[slices].copy()
-        # assert 0 < sliced_label[-1].max()
-        sliced_input = img_input[slices].copy()
+            sliced_label = img_label[slices].copy()
+            # assert 0 < sliced_label[-1].max()
+            sliced_input = img_input[slices].copy()
 
-        # scale labels by resize factor
-        if 0 < sum(self.scale_factors):
-            sliced_label[0] *= self.crop_size[-1] / item_crop_size[-1]  # X
-            sliced_label[1] *= self.crop_size[-2] / item_crop_size[-2]  # Y
-            if self.n_dims == 3:
-                sliced_label[2] *= self.crop_size[-3] / item_crop_size[-3]  # Z
+            # scale labels by resize factor
+            if 0 < sum(self.scale_factors):
+                sliced_label[0] *= self.crop_size[-1] / item_crop_size[-1]  # X
+                sliced_label[1] *= self.crop_size[-2] / item_crop_size[-2]  # Y
+                if self.n_dims == 3:
+                    sliced_label[2] *= self.crop_size[-3] / \
+                        item_crop_size[-3]  # Z
 
-        if self.rotation_angle is not None and 0 < self.rotation_angle:
-            # rotate image
-            theta = randint(-self.rotation_angle, self.rotation_angle)
-            if self.n_dims == 3:
-                sliced_input = np.array([
-                    [rotate(
-                        sliced_input[c, z],
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=1,  # 1: Bi-linear (default)
-                    ) for z in range(sliced_input.shape[1])
-                    ] for c in range(sliced_input.shape[0])
-                ])
-            else:
-                sliced_input = np.array([
-                    rotate(
-                        sliced_input[c],
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=1,  # 1: Bi-linear (default)
-                    ) for c in range(sliced_input.shape[0])
-                ])
-            # rotate label
-            if self.n_dims == 3:
-                sliced_label = np.array([
-                    [rotate(
-                        sliced_label[c, z],
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=0,  # 0: Nearest-neighbor
-                    ) for z in range(sliced_label.shape[1])
-                    ] for c in range(sliced_label.shape[0])
-                ])
-            else:
-                sliced_label = np.array([
-                    rotate(
-                        sliced_label[c],
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=0,  # 0: Nearest-neighbor
-                    ) for c in range(sliced_label.shape[0])
-                ])
-            # update flow label (y axis is inversed in the image coordinate)
-            cos_theta = math.cos(math.radians(theta))
-            sin_theta = math.sin(math.radians(theta))
-            sliced_label_x = sliced_label[0].copy()
-            sliced_label_y = sliced_label[1].copy() * -1
-            sliced_label[0] = (cos_theta * sliced_label_x -
-                               sin_theta * sliced_label_y)
-            sliced_label[1] = (sin_theta * sliced_label_x +
-                               cos_theta * sliced_label_y) * -1
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
+                if self.n_dims == 3:
+                    sliced_input = np.array([
+                        [rotate(
+                            sliced_input[c, z],
+                            theta,
+                            resize=True,
+                            preserve_range=True,
+                            order=1,  # 1: Bi-linear (default)
+                        ) for z in range(sliced_input.shape[1])
+                        ] for c in range(sliced_input.shape[0])
+                    ])
+                else:
+                    sliced_input = np.array([
+                        rotate(
+                            sliced_input[c],
+                            theta,
+                            resize=True,
+                            preserve_range=True,
+                            order=1,  # 1: Bi-linear (default)
+                        ) for c in range(sliced_input.shape[0])
+                    ])
+                h_crop, w_crop = self.crop_size[-2:]
+                h_rotate, w_rotate = sliced_input.shape[-2:]
+                r_origin = max(0, (h_rotate - h_crop) // 2)
+                c_origin = max(0, (w_rotate - w_crop) // 2)
+                sliced_input = sliced_input[...,
+                                            r_origin:r_origin+h_crop,
+                                            c_origin:c_origin+w_crop]
+                # rotate label
+                if self.n_dims == 3:
+                    sliced_label = np.array([
+                        [rotate(
+                            sliced_label[c, z],
+                            theta,
+                            resize=True,
+                            preserve_range=True,
+                            order=0,  # 0: Nearest-neighbor
+                        ) for z in range(sliced_label.shape[1])
+                        ] for c in range(sliced_label.shape[0])
+                    ])
+                else:
+                    sliced_label = np.array([
+                        rotate(
+                            sliced_label[c],
+                            theta,
+                            resize=True,
+                            preserve_range=True,
+                            order=0,  # 0: Nearest-neighbor
+                        ) for c in range(sliced_label.shape[0])
+                    ])
+                sliced_label = sliced_label[...,
+                                            r_origin:r_origin+h_crop,
+                                            c_origin:c_origin+w_crop]
+                if sliced_label[-1].max() == 0:
+                    continue
+                # update flow label (y axis is inversed in the image coordinate)
+                cos_theta = math.cos(math.radians(theta))
+                sin_theta = math.sin(math.radians(theta))
+                sliced_label_x = sliced_label[0].copy()
+                sliced_label_y = sliced_label[1].copy() * -1
+                sliced_label[0] = (cos_theta * sliced_label_x -
+                                   sin_theta * sliced_label_y)
+                sliced_label[1] = (sin_theta * sliced_label_x +
+                                   cos_theta * sliced_label_y) * -1
+            break
 
         tensor_input = torch.from_numpy(sliced_input)
         tensor_label = torch.from_numpy(sliced_label)

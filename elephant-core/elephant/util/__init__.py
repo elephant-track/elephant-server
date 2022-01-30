@@ -25,9 +25,12 @@
 """Exposing utility functions."""
 
 from collections import OrderedDict
+import os
 import sys
 
 import torch
+
+RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
 
 def get_next_multiple(value, base):

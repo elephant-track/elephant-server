@@ -66,7 +66,15 @@ def main():
         for i, f in tqdm(enumerate(files)):
             config.timepoint = i
             config.tiff_input = f
-            spots.extend(detect_spots(config))
+            spots.extend(detect_spots(
+                str(config.device), config.model_path, config.keep_axials,
+                config.is_3d, config.crop_size, config.scales,
+                config.cache_maxbytes, config.use_2d, config.use_median,
+                config.patch_size, config.crop_box, config.c_ratio,
+                config.p_thresh, config.r_min, config.r_max,
+                config.output_prediction, None, None, config.timepoint,
+                config.tiff_input, config.memmap_dir, config.batch_size,
+            ))
         with open(args.spots, 'w') as f:
             json.dump({'spots': spots}, f)
     elif args.command == 'linking':

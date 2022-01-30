@@ -121,6 +121,7 @@ def main():
                 rotation_angle=config.rotation_angle,
                 length=train_length,
                 cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
             eval_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
@@ -134,6 +135,7 @@ def main():
                 length=eval_length,
                 adaptive_length=adaptive_length,
                 cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)
@@ -161,6 +163,8 @@ def main():
                 scale_factor_base=config.scale_factor_base,
                 rotation_angle=config.rotation_angle,
                 length=train_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
             eval_datasets.append(FlowDatasetZarr(
                 config.zpath_input,
@@ -173,6 +177,8 @@ def main():
                 is_eval=True,
                 length=eval_length,
                 adaptive_length=adaptive_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
     train_dataset = ConcatDataset(train_datasets)
     eval_dataset = ConcatDataset(eval_datasets)
@@ -205,7 +211,8 @@ def main():
                       config.epoch_start, eval_loader, config.patch_size,
                       config.is_cpu(), True)
         else:
-            world_size = 2 if config.is_cpu() else torch.cuda.device_count()
+            world_size = (2 if config.is_cpu() else
+                          torch.cuda.device_count())
             mp.spawn(run_train,
                      args=(world_size, models, train_loader, optimizers,
                            loss_fn, config.n_epochs, config.model_path, False,

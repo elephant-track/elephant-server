@@ -26,7 +26,8 @@
 
 from enum import Enum
 
-REDIS_KEY_COUNT = 'count'
+import redis
+
 REDIS_KEY_LR = 'lr'
 REDIS_KEY_NCROPS = 'n_crops'
 REDIS_KEY_STATE = 'state'
@@ -39,3 +40,6 @@ class TrainState(Enum):
     IDLE = 0
     RUN = 1
     WAIT = 2
+
+
+redis_client = redis.Redis.from_url('redis://localhost:6379/0')

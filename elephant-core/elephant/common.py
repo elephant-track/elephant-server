@@ -27,8 +27,10 @@
 from collections import OrderedDict
 import gc
 import hashlib
+from functools import partial
 from functools import reduce
 import json
+import multiprocessing as mp
 import math
 from operator import mul
 import os
@@ -50,16 +52,12 @@ import torch.utils.data as du
 if os.environ.get('CTC') != '1':
     import torch.utils.tensorboard as tb
     import zarr
-    import redis
-    redis_client = redis.StrictRedis.from_url("redis://localhost:6379/0")
-try:
-    redis_client.ping()
-except Exception:
-    redis_client = None
 
 from elephant.datasets import AutoencoderDatasetZarr
+from elephant.datasets import get_input_at
 from elephant.datasets import FlowDatasetZarr
 from elephant.datasets import SegmentationDatasetZarr
+from elephant.datasets import SegmentationDatasetPrediction
 from elephant.logging import publish_mq
 from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
@@ -67,6 +65,7 @@ from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
+from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
@@ -82,6 +81,12 @@ from elephant.util.scaled_moments import scaled_moments_central
 MODEL_URL_ROOT = (
     'https://github.com/elephant-track/elephant-server/releases/download/data/'
 )
+
+PROFILE = "ELEPHANT_PROFILE" in os.environ
+
+if os.environ.get('ELEPHANT_PROFILE') is None:
+    def profile(func):
+        return func
 
 
 class TensorBoard(object):
@@ -114,7 +119,8 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
                   scale_factor_base, rotation_angle, zpath_input,
                   zpath_seg_label, log_interval=100, log_dir=None,
                   step_offset=0, epoch_start=0, is_cpu=False,
-                  is_mixed_precision=True, cache_maxbytes=None):
+                  is_mixed_precision=True, cache_maxbytes=None,
+                  memmap_dir=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
@@ -143,10 +149,10 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
         keep_axials,
         scales=scales,
         is_livemode=is_livemode,
-        redis_client=redis_client,
         scale_factor_base=scale_factor_base,
         rotation_angle=rotation_angle,
         cache_maxbytes=cache_maxbytes,
+        memmap_dir=memmap_dir,
     )
     loader = du.DataLoader(dataset, batch_size=batch_size,
                            shuffle=True, num_workers=world_size*2)
@@ -161,7 +167,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
                         is_3d, zpath_input, log_interval=100,
                         log_dir=None, step_offset=0, epoch_start=0,
                         is_cpu=False, is_mixed_precision=True,
-                        cache_maxbytes=None):
+                        cache_maxbytes=None, memmap_dir=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
@@ -186,6 +192,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
         scales=scales,
         scale_factor_base=0.2,
         cache_maxbytes=cache_maxbytes,
+        memmap_dir=memmap_dir,
     )
     loader = du.DataLoader(dataset, batch_size=1,
                            shuffle=True, num_workers=1)
@@ -200,7 +207,8 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                    n_crops, is_3d, scale_factor_base, rotation_angle,
                    zpath_input, zpath_flow_label, log_interval=100,
                    log_dir=None, step_offset=0, epoch_start=0, is_cpu=False,
-                   is_mixed_precision=True, cache_maxbytes=None):
+                   is_mixed_precision=True, cache_maxbytes=None,
+                   memmap_dir=None):
     models = load_flow_models(model_path,
                               get_device(),
                               is_3d=is_3d)
@@ -223,6 +231,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
         scale_factor_base=scale_factor_base,
         rotation_angle=rotation_angle,
         cache_maxbytes=cache_maxbytes,
+        memmap_dir=memmap_dir,
     )
     loader = du.DataLoader(dataset, batch_size=batch_size)
     run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
@@ -315,11 +324,6 @@ def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
                 for batch_id, ((x, keep_axials), y) in enumerate(loader):
                     if is_ddp:
                         dist.barrier()
-                    # (torch.tensor(-100.), torch.tensor(-100))
-                    # is returned when aborted
-                    if (torch.eq(x, torch.tensor(-100.)).any() and
-                            torch.eq(y, torch.tensor(-100)).any()):
-                        return
                     if (torch.eq(x, torch.tensor(-200.)).any() and
                             torch.eq(y, torch.tensor(-200)).any()):
                         is_ncrops_updated = True
@@ -555,20 +559,15 @@ def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
     loss_fn.to(device)
     loss = 0
     with torch.no_grad():
-        for batch_id, ((x, keep_axials), y) in enumerate(loader):
-            # (torch.tensor(-100.), torch.tensor(-100))
-            # is returned when aborted
-            if (torch.eq(x, torch.tensor(-100.)).any() and
-                    torch.eq(y, torch.tensor(-100)).any()):
-                break
-
+        for (x, keep_axials), y in loader:
             x, y = x.to(device), y.to(device)
             if patch_size is None:
                 prediction = model(x, keep_axials)
             else:
                 prediction = torch.from_numpy(
-                    predict(model, x, keep_axials, patch_size,
-                            is_logarithm=False, is_logging=is_logging)
+                    predict(model, device, x, keep_axials, patch_size,
+                            is_logarithm=False, is_logging=is_logging,
+                            batchsize=1, is_dp=False)
                 ).to(device)
             loss += loss_fn(prediction, y).item()
         loss /= len(loader)
@@ -580,10 +579,11 @@ def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
     return loss
 
 
-def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
+def _patch_predict(model, device, input, keep_axials, patch_size, func,
+                   is_logging=True, batch_size=1, is_dp=True):
     n_dims = len(patch_size)
-    input_shape = x.shape[-n_dims:]
-    n_batches = x.shape[0]
+    input_shape = input.shape[-n_dims:]
+    n_data = input.shape[0]
     # all elements in patch shape should be smaller than or equal to those of
     # input shape
     patch_size = [min(patch_size[i], input_shape[i]) for i in range(n_dims)]
@@ -606,16 +606,16 @@ def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
         model.module.out_conv.out_channels if isinstance(model, DDP) else
         model.out_conv.out_channels
     )
-    prediction = np.zeros((n_batches, out_channels,) + input_shape,
-                          dtype='float32')
-    sum_patches = np.prod(n_patches)
+    sum_patches = n_data * np.prod(n_patches)
     i_patch = 0
+    patch_list = []
     for iz in range(n_patches[-3] if n_dims == 3 else 1):
         if n_dims == 3:
             slice_z = slice(intervals[-3] * iz,
                             intervals[-3] * iz + patch_size[-3])
-            if x.shape[-3] < slice_z.stop:
-                slice_z = slice(x.shape[-3] - patch_size[-3], x.shape[-3])
+            if input_shape[-3] < slice_z.stop:
+                slice_z = slice(input_shape[-3] - patch_size[-3],
+                                input_shape[-3])
             patch_weight_z = np.ones(patch_size, dtype='float32')
             if 0 < iz:
                 patch_weight_z[:overlaps[-3]] *= np.linspace(
@@ -628,9 +628,9 @@ def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
         for iy in range(n_patches[-2]):
             slice_y = slice(intervals[-2] * iy,
                             intervals[-2] * iy + patch_size[-2])
-            if x.shape[-2] < slice_y.stop:
-                slice_y = slice(x.shape[-2] - patch_size[-2],
-                                x.shape[-2])
+            if input_shape[-2] < slice_y.stop:
+                slice_y = slice(input_shape[-2] - patch_size[-2],
+                                input_shape[-2])
             if n_dims == 3:
                 patch_weight_zy = patch_weight_z.copy()
             else:
@@ -645,12 +645,11 @@ def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
                 ).reshape(1, -1, 1)
             for ix in range(n_patches[-1]):
                 i_patch += 1
-                if is_logging:
-                    logger().info(f'processing {i_patch} / {sum_patches}')
                 slice_x = slice(intervals[-1] * ix,
                                 intervals[-1] * ix + patch_size[-1])
-                if x.shape[-1] < slice_x.stop:
-                    slice_x = slice(x.shape[-1] - patch_size[-1], x.shape[-1])
+                if input_shape[-1] < slice_x.stop:
+                    slice_x = slice(input_shape[-1] - patch_size[-1],
+                                    input_shape[-1])
                 patch_weight_zyx = patch_weight_zy.copy()
                 if 0 < ix:
                     patch_weight_zyx[:, :, :overlaps[-1]] *= np.linspace(
@@ -660,73 +659,77 @@ def _patch_predict(model, x, keep_axials, patch_size, func, is_logging=True):
                     patch_weight_zyx[:, :, -overlaps[-1]:] *= np.linspace(
                         1, 0, overlaps[-1]
                     ).reshape(1, 1, -1)
-                slices = [slice(None), slice(None), slice_y, slice_x]
+                slices = [slice(None), slice_y, slice_x]
                 if n_dims == 3:
-                    slices.insert(2, slice_z)
-                y = func(
-                    model(x[slices], keep_axials).detach().cpu().numpy()
-                )
+                    slices.insert(1, slice_z)
                 if n_dims == 2:
                     patch_weight_zyx = patch_weight_zyx[0]
-                prediction[tuple(slices)] += y * patch_weight_zyx[None, None]
+                patch_list.append((slices, patch_weight_zyx))
+    prediction = np.zeros((n_data, out_channels,) + input_shape,
+                          dtype='float32')
+    dataset = SegmentationDatasetPrediction(input,
+                                            patch_list,
+                                            keep_axials)
+    loader = du.DataLoader(dataset, batch_size=batch_size,
+                           shuffle=False, num_workers=2)
+    if is_dp and str(device) != 'cpu' and 1 < torch.cuda.device_count():
+        model = torch.nn.DataParallel(model)
+    model.to(device)
+    model.eval()
+    with torch.no_grad():
+        try:
+            for batch, (x, kas, data_inds, patch_inds) in enumerate(loader):
+                if (redis_client is not None and
+                    int(redis_client.get(REDIS_KEY_STATE))
+                        == TrainState.IDLE.value):
+                    raise KeyboardInterrupt
+                if is_logging:
+                    current_patch = min((batch + 1) * batch_size, sum_patches)
+                    logger().info(
+                        f'processing {current_patch} / {sum_patches}')
+                x = x.to(device)
+                y = func(model(x, kas).detach().cpu().numpy())
+                for index in range(len(y)):
+                    slices, patch_weight = patch_list[patch_inds[index]]
+                    prediction[data_inds[index]][tuple(slices)] += (
+                        y[index] * patch_weight
+                    )
+        except RuntimeError:
+            raise KeyboardInterrupt
     return prediction
 
 
-def predict(model, x, keep_axials, patch_size=None, is_logarithm=True,
-            is_logging=True):
+def predict(model, device, input, keep_axials, patch_size=None,
+            is_logarithm=True, is_logging=True, batch_size=1, is_dp=True):
     func = (lambda x: np.exp(x)) if is_logarithm else (lambda x: x)
-    if patch_size is not None:
-        return _patch_predict(model, x, keep_axials, patch_size, func,
-                              is_logging)
-    else:
-        return func(model(x, keep_axials).detach().cpu().numpy())
+    if patch_size is None:
+        patch_size = input.shape[2:]
+    return _patch_predict(model, device, input, keep_axials, patch_size,
+                          func, is_logging, batch_size=batch_size,
+                          is_dp=is_dp)
 
 
-def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
-                        patch_size=None, crop_box=None, is_logging=True):
-    img = img.astype('float32')
-    n_dims = len(img.shape)
-    is_3d = n_dims == 3
-    if is_3d and use_median:
-        global_median = np.median(img)
-        for z in range(img.shape[0]):
-            slice_median = np.median(img[z])
-            if 0 < slice_median:
-                img[z] -= slice_median - global_median
-    img = normalize_zero_one(img)
+def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
+                        crop_box=None, is_logging=True, batch_size=1):
     if crop_box is not None:
         slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
                   slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
-        if is_3d:  # Z
+        if img.ndim == 3:  # Z
             slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
         img = img[slices]
-    if patch_size is None:
-        pad_base = (16, 16)
-        if is_3d:
-            pad_base = (2**keep_axials.count(False),) + pad_base
-        pad_shape = tuple(
-            get_pad_size(img.shape[i], pad_base[i])
-            for i in range(n_dims)
-        )
-        slices = (slice(None),) + tuple(
-            slice(None) if max(pad_shape[i]) == 0 else
-            slice(pad_shape[i][0], -pad_shape[i][1])
-            for i in range(n_dims)
-        )
-        img = np.pad(img, pad_shape, mode='constant', constant_values=0)
     with torch.no_grad():
-        x = torch.from_numpy(img[np.newaxis, np.newaxis]).to(device)
+        x = torch.from_numpy(img[np.newaxis, np.newaxis])
         keep_axials = torch.tensor(keep_axials)[None]
         prediction = np.mean([predict(model,
+                                      device,
                                       x,
                                       keep_axials,
                                       patch_size,
                                       is_logarithm=True,
-                                      is_logging=is_logging)[0]
+                                      is_logging=is_logging,
+                                      batch_size=batch_size)[0]
                               for model in models], axis=0)
-    if patch_size is None:
-        prediction = prediction[slices]
-    if is_3d:
+    if img.ndim == 3:
         for z in range(prediction.shape[1]):
             post_fg = np.maximum(
                 prediction[2, z] - normalize_zero_one(
@@ -742,73 +745,93 @@ def _get_seg_prediction(img, models, keep_axials, device, use_median=True,
     return prediction
 
 
-def detect_spots(config):
-    if hasattr(config, 'tiff_input') and config.tiff_input is not None:
-        img_input = skimage.io.imread(config.tiff_input)
-    elif config.zpath_input is not None:
-        za_input = zarr.open(config.zpath_input, mode='a')
-        img_input = za_input[config.timepoint]
+def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
+                 crop_size=(16, 384, 384), scales=None, cache_maxbytes=None,
+                 use_2d=False, use_median=False, patch_size=None, crop_box=None,
+                 c_ratio=0.4, p_thresh=0.5, r_min=0, r_max=1e6,
+                 output_prediction=False, zpath_input=None,
+                 zpath_seg_output=None, timepoint=None, tiff_input=None,
+                 memmap_dir=None, batch_size=1):
+    use_median = use_median and is_3d
+    if tiff_input is not None:
+        img_input = skimage.io.imread(tiff_input).astype('float32')
+        if use_median:
+            global_median = np.median(img_input)
+            for z in range(img_input.shape[0]):
+                slice_median = np.median(img_input[z])
+                if 0 < slice_median:
+                    img_input[z] -= slice_median - global_median
+        img_input = normalize_zero_one(img_input)
+    elif zpath_input is not None:
+        img_input = get_input_at(zarr.open(zpath_input, mode='r'),
+                                 timepoint,
+                                 memmap_dir=memmap_dir,
+                                 use_median=use_median)
+    else:
+        raise RuntimeError('No image is specified.')
     try:
-        models = load_seg_models(config.model_path,
-                                 config.keep_axials,
-                                 config.device,
+        models = load_seg_models(model_path,
+                                 keep_axials,
+                                 device,
                                  is_eval=True,
-                                 is_3d=config.is_3d,
-                                 zpath_input=config.zpath_input,
-                                 crop_size=config.crop_size,
-                                 scales=config.scales,
-                                 cache_maxbytes=config.cache_maxbytes)
-        if len(img_input.shape) == 3 and config.use_2d:
+                                 is_3d=is_3d,
+                                 zpath_input=zpath_input,
+                                 crop_size=crop_size,
+                                 scales=scales,
+                                 cache_maxbytes=cache_maxbytes)
+        if len(img_input.shape) == 3 and use_2d:
             prediction = np.swapaxes(np.array([
                 _get_seg_prediction(img_input[z],
                                     models,
-                                    config.keep_axials,
-                                    config.device,
-                                    config.use_median,
-                                    config.patch_size[-2:],
-                                    config.crop_box)
+                                    keep_axials,
+                                    device,
+                                    patch_size[-2:],
+                                    crop_box,
+                                    batch_size=batch_size)
                 for z in range(img_input.shape[0])
             ]), 0, 1)
         else:
             prediction = _get_seg_prediction(img_input,
                                              models,
-                                             config.keep_axials,
-                                             config.device,
-                                             config.use_median,
-                                             config.patch_size,
-                                             config.crop_box)
+                                             keep_axials,
+                                             device,
+                                             patch_size,
+                                             crop_box,
+                                             batch_size=batch_size)
+        spots = []
+        _find_and_push_spots(spots,
+                             timepoint,
+                             # last channel is the center label
+                             prediction[-1],
+                             scales,
+                             c_ratio=c_ratio,
+                             p_thresh=p_thresh,
+                             r_min=r_min,
+                             r_max=r_max,
+                             crop_box=crop_box,
+                             use_2d=use_2d)
+    except KeyboardInterrupt:
+        return []
     except Exception:
         logger().exception('Failed in detect_spots')
     finally:
         torch.cuda.empty_cache()
 
-    spots = []
-    _find_and_push_spots(spots,
-                         config.timepoint,
-                         prediction[-1],  # last channel is the center label
-                         config.scales,
-                         c_ratio=config.c_ratio,
-                         p_thresh=config.p_thresh,
-                         r_min=config.r_min,
-                         r_max=config.r_max,
-                         crop_box=config.crop_box,
-                         use_2d=config.use_2d)
-
-    if config.output_prediction and config.zpath_seg_output is not None:
-        za_seg = zarr.open(config.zpath_seg_output, mode='a')
+    if output_prediction and zpath_seg_output is not None:
+        za_seg = zarr.open(zpath_seg_output, mode='a')
         slices_crop = tuple(
-            slice(config.crop_box[i],
-                  config.crop_box[i] + config.crop_box[i + 3])
-            if config.crop_box is not None else
+            slice(crop_box[i],
+                  crop_box[i] + crop_box[i + 3])
+            if crop_box is not None else
             slice(None)
-            for i in range(0 if config.is_3d else 1, 3)
+            for i in range(0 if is_3d else 1, 3)
         )
-        if config.is_3d:  # 3D
+        if is_3d:  # 3D
             dims_order = [1, 2, 3, 0]
         else:  # 2D
             # slices_crop = (0,) + slices_crop
             dims_order = [1, 2, 0]
-        slices_crop = (config.timepoint,) + slices_crop
+        slices_crop = (timepoint,) + slices_crop
         za_seg[slices_crop] = (np.transpose(prediction, dims_order)
                                .astype('float16'))
 
@@ -816,7 +839,7 @@ def detect_spots(config):
 
 
 def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
-                         is_3d, is_logging=True):
+                         is_3d, is_logging=True, batch_size=1):
     img = normalize_zero_one(img.astype('float32'))
     models = load_flow_models(model_path,
                               device,
@@ -836,12 +859,13 @@ def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
         )
         img = np.pad(img, ((0, 0),) + pad_shape, mode='reflect')
     with torch.no_grad():
-        x = torch.from_numpy(img[np.newaxis]).to(device)
+        x = torch.from_numpy(img[np.newaxis])
         keep_axials = torch.tensor(keep_axials)[None]
         prediction = np.mean(
             [
-                predict(model, x, keep_axials, patch_size, is_logarithm=False,
-                        is_logging=is_logging)[0]
+                predict(model, device, x, keep_axials, patch_size,
+                        is_logarithm=False, is_logging=is_logging,
+                        batch_size=batch_size)[0]
                 for model in models
             ],
             axis=0)
@@ -961,20 +985,79 @@ def spots_with_flow(config, spots):
     return res_spots
 
 
-def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
-                         p_thresh=0.3, r_min=0, r_max=1e6, crop_box=None,
+@profile
+def _region_to_spot(min_area, scales, origins, n_dims, use_2d, c_ratio, idx,
+                    r_min, r_max, i_frame, props):
+    area, centroid, bbox, image = props
+    if area < min_area:
+        # print('skip a spot with volume {} below threshold {}'
+        #       .format(area, min_area))
+        return None
+    centroid = [(o + c) * s for c, s,
+                o in zip(centroid, scales, origins)]
+    # centroid = ((origins + centroid) * scales).tolist()
+    bbox_shape = [bbox[i + n_dims] - bbox[i]
+                  for i in range(n_dims)]
+    # correction for floor effect duriing label generation
+    c_scales = [scales[i] * (bbox_shape[i] + 1.) / bbox_shape[i]
+                for i in range(n_dims)]
+    if use_2d and n_dims == 3:
+        c_scales[0] *= c_ratio
+    moments_central = scaled_moments_central(image, c_scales, order=2)
+    cov = moments_central[idx].reshape((n_dims, n_dims))
+    if not cov.any():  # if all zeros
+        return None
+    cov /= moments_central[(0,) * n_dims]
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    if ((eigvals < 0).any() or
+        np.iscomplex(eigvals).any() or
+            np.iscomplex(eigvecs).any()):
+        logger().debug(
+            f'skip a spot with invalid eigen value(s): {eigvals}')
+        return None
+    # https://stackoverflow.com/questions/22146383/covariance-matrix-of-an-ellipse
+    # https://github.com/scikit-image/scikit-image/blob/master/skimage/measure/_regionprops.py#L288
+    radii = 2 * np.sqrt(eigvals)
+    radii /= c_ratio
+    radii = np.array([radii[i] if 0 < radii[i] else max(
+        r_min, scales[i]) for i in range(len(radii))])
+    if (radii < r_min).any():
+        # print(f'skip a spot with radii {radii} below threshold {r_min}')
+        return None
+    radii = np.minimum(r_max, radii)
+    cov = eigvecs.dot(np.diag(radii ** 2)).dot(eigvecs.T)
+
+    if n_dims == 2:
+        centroid.insert(0, 0.)
+        tmp = np.eye(3)
+        tmp[-2:, -2:] = cov
+        cov = tmp
+
+    def flatten(o): return [item for sublist in o for item in sublist]
+    spot = {
+        't': i_frame,
+        'pos': centroid[::-1],
+        'covariance': flatten(cov)[::-1]
+    }
+    return spot
+
+
+def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
+                         p_thresh=0.5, r_min=0, r_max=1e6, crop_box=None,
                          use_2d=False):
     n_dims = len(c_probs.shape)
     assert n_dims == 2 or n_dims == 3, (
         f'n_dims: len(c_probs.shape) shoud be 2 or 3 but got {n_dims}'
     )
     origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
+    origins = np.array(origins)
     labels = skimage.measure.label(p_thresh < c_probs)
     regions = skimage.measure.regionprops(labels)
     logger().info(f'{len(regions)} detections found')
 
     if scales is None:
         scales = (1.,) * n_dims
+    scales = np.array(scales)
     # https://forum.image.sc/t/regionprops-inertia-tensor-eigvals/23559/2
     if n_dims == 2:
         idx = ((2, 1, 1, 0),
@@ -984,60 +1067,40 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.5,
         idx = ((2, 1, 1, 1, 0, 0, 1, 0, 0),
                (0, 1, 0, 1, 2, 1, 0, 1, 0),
                (0, 0, 1, 0, 0, 1, 1, 1, 2))
-        min_area = 4 / 3 * math.pi * \
-            (r_min * c_ratio) ** 3 / reduce(mul, scales)
-    for i, region in enumerate(regions):
-        if region.area < min_area:
-            # print('skip a spot with volume {} below threshold {}'
-            #       .format(region.area, min_area))
-            continue
-        centroid = [(o + c) * s for c, s,
-                    o in zip(region.centroid, scales, origins)]
-        bbox_shape = [region.bbox[i + n_dims] - region.bbox[i]
-                      for i in range(n_dims)]
-        # correction for floor effect duriing label generation
-        c_scales = [scales[i] * (bbox_shape[i] + 1.) / bbox_shape[i]
-                    for i in range(n_dims)]
-        if use_2d and n_dims == 3:
-            c_scales[0] *= c_ratio
-        moments_central = scaled_moments_central(
-            region.image, c_scales, order=2)
-        cov = moments_central[idx].reshape((n_dims, n_dims))
-        if not cov.any():  # if all zeros
-            continue
-        cov /= moments_central[(0,) * n_dims]
-        eigvals, eigvecs = np.linalg.eigh(cov)
-        if ((eigvals < 0).any() or
-            np.iscomplex(eigvals).any() or
-                np.iscomplex(eigvecs).any()):
-            logger().debug(
-                f'skip a spot with invalid eigen value(s): {eigvals}')
-            continue
-        # https://stackoverflow.com/questions/22146383/covariance-matrix-of-an-ellipse
-        # https://github.com/scikit-image/scikit-image/blob/master/skimage/measure/_regionprops.py#L288
-        radii = 2 * np.sqrt(eigvals)
-        radii /= c_ratio
-        radii = np.array([radii[i] if 0 < radii[i] else max(
-            r_min, scales[i]) for i in range(len(radii))])
-        if (radii < r_min).any():
-            # print(f'skip a spot with radii {radii} below threshold {r_min}')
-            continue
-        radii = np.minimum(r_max, radii)
-        cov = eigvecs.dot(np.diag(radii ** 2)).dot(eigvecs.T)
+        min_area = (4 / 3 * math.pi * (r_min * c_ratio) ** 3
+                    / reduce(mul, scales))
 
-        if n_dims == 2:
-            centroid.insert(0, 0.)
-            tmp = np.eye(3)
-            tmp[-2:, -2:] = cov
-            cov = tmp
+    props_list = [[region.area, region.centroid, region.bbox, region.image]
+                  for region in regions]
 
-        def flatten(o): return [item for sublist in o for item in sublist]
-        spot = {
-            't': i_frame,
-            'pos': centroid[::-1],
-            'covariance': flatten(cov)[::-1]
-        }
-        spots.append(spot)
+    logger().info(
+        f'calculating {"ellipse" if n_dims == 2 else "ellipsoid"} parameters...'
+    )
+    # multiprocessing does not help so much
+    if PROFILE or True:
+        results = [
+            _region_to_spot(min_area, scales, origins, n_dims, use_2d, c_ratio,
+                            idx, r_min, r_max, i_frame, props)
+            for props in props_list
+        ]
+        for r in results:
+            if (redis_client is not None and
+                    int(redis_client.get(REDIS_KEY_STATE)) ==
+                    TrainState.IDLE.value):
+                raise KeyboardInterrupt
+            if r is not None:
+                spots.append(r)
+    else:
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            results = pool.imap(
+                partial(_region_to_spot, min_area, scales, origins, n_dims,
+                        use_2d, c_ratio, idx, r_min, r_max, i_frame),
+                props_list
+            )
+            for r in results:
+                if r is not None:
+                    spots.append(r)
+    logger().info(f'{len(spots)} detections kept')
 
 
 def export_ctc_labels(config, spots_dict, redis_c=None):

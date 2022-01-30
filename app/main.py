@@ -68,7 +68,6 @@ from elephant.config import SegmentationEvalConfig
 from elephant.config import SegmentationTrainConfig
 from elephant.logging import logger
 from elephant.logging import publish_mq
-from elephant.redis_util import REDIS_KEY_COUNT
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_STATE
@@ -86,8 +85,8 @@ from elephant.util.ellipsoid import ellipsoid
 def make_celery(app):
     celery = Celery(
         app.import_name,
-        backend=app.config['RESULT_BACKEND'],
-        broker=app.config['CELERY_BROKER_URL']
+        backend=app.config['result_backend'],
+        broker=app.config['broker_url']
     )
     celery.conf.update(app.config)
 
@@ -102,14 +101,14 @@ def make_celery(app):
 
 app = Flask(__name__)
 app.config.update(
-    CELERY_BROKER_URL='redis://localhost:6379',
-    RESULT_BACKEND='redis://localhost:6379'
+    broker_url='redis://localhost:6379',
+    result_backend='redis://localhost:6379',
+    worker_redirect_stdouts=False,
 )
 
 celery = make_celery(app)
 redis_client = FlaskRedis(app)
 redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
-redis_client.set(REDIS_KEY_COUNT, 0)
 
 
 @celery.task()
@@ -118,9 +117,10 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    lr, n_crops, is_3d, is_livemode, scale_factor_base,
                    rotation_angle, zpath_input, zpath_seg_label, log_interval,
                    log_dir, step_offset=0, epoch_start=0, is_cpu=False,
-                   is_mixed_precision=True, cache_maxbytes=None):
+                   is_mixed_precision=True, cache_maxbytes=None,
+                   memmap_dir=None):
     if not torch.cuda.is_available():
-        is_cpu = False
+        is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
     mp.spawn(run_train_seg,
              args=(world_size, spot_indices, batch_size, crop_size,
@@ -128,28 +128,46 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    keep_axials, scales, lr, n_crops, is_3d, is_livemode,
                    scale_factor_base, rotation_angle, zpath_input,
                    zpath_seg_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes),
+                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
+                   memmap_dir),
              nprocs=world_size,
              join=True)
 
 
-@celery.task()
+@ celery.task()
 def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                     keep_axials, scales, lr, n_crops, is_3d, scale_factor_base,
                     rotation_angle, zpath_input, zpath_flow_label,
                     log_interval, log_dir, step_offset=0, epoch_start=0,
-                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None):
+                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None,
+                    memmap_dir=None):
     if not torch.cuda.is_available():
-        is_cpu = False
+        is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
     mp.spawn(run_train_flow,
              args=(world_size, spot_indices, batch_size, crop_size, model_path,
                    n_epochs, keep_axials, scales, lr, n_crops, is_3d,
                    scale_factor_base, rotation_angle, zpath_input,
                    zpath_flow_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes),
+                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
+                   memmap_dir),
              nprocs=world_size,
              join=True)
+
+
+@ celery.task()
+def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_3d=True,
+                      crop_size=(16, 384, 384), scales=None,
+                      cache_maxbytes=None, use_2d=False, use_median=False,
+                      patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
+                      r_min=0, r_max=1e6, output_prediction=False,
+                      zpath_input=None, zpath_seg_output=None, timepoint=None,
+                      tiff_input=None, memmap_dir=None, batch_size=1):
+    return detect_spots(device, model_path, keep_axials, is_3d, crop_size,
+                        scales, cache_maxbytes, use_2d, use_median, patch_size,
+                        crop_box, c_ratio, p_thresh, r_min, r_max,
+                        output_prediction, zpath_input, zpath_seg_output,
+                        timepoint, tiff_input, memmap_dir, batch_size)
 
 
 class FileRemover(object):
@@ -179,13 +197,13 @@ def device():
     return g.device
 
 
-@app.before_request
+@ app.before_request
 def log_before_request():
     if request.endpoint != 'get_gpus':
         logger().info(f'START {request.method} {request.path}')
 
 
-@app.after_request
+@ app.after_request
 def log_after_request(response):
     if request.endpoint != 'get_gpus':
         logger().info(
@@ -194,7 +212,7 @@ def log_after_request(response):
     return response
 
 
-@app.route('/state', methods=['GET', 'POST'])
+@ app.route('/state', methods=['GET', 'POST'])
 def state():
     if request.method == 'POST':
         if request.headers['Content-Type'] != 'application/json':
@@ -212,7 +230,7 @@ def state():
     return jsonify(success=True, state=int(redis_client.get(REDIS_KEY_STATE)))
 
 
-@app.route('/params', methods=['GET', 'POST'])
+@ app.route('/params', methods=['GET', 'POST'])
 def params():
     if request.method == 'POST':
         if request.headers['Content-Type'] != 'application/json':
@@ -250,7 +268,7 @@ def _update_flow_labels(spots_dict,
         label_indices = set()
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
-                logger().info('aborted')
+                logger().info('update aborted')
                 return jsonify({'completed': False})
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
@@ -388,11 +406,16 @@ def train_flow():
             config.zpath_input, config.zpath_flow_label,
             config.log_interval, config.log_dir, step_offset, epoch_start,
             config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
+            config.memmap_dir,
         ).wait()
-        if (int(redis_client.get(REDIS_KEY_STATE)) ==
-                TrainState.IDLE.value):
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
             logger().info('training aborted')
             return jsonify({'completed': False})
+    except KeyboardInterrupt:
+        logger().info('training aborted')
+        return jsonify({'completed': False})
     except RuntimeError as e:
         logger().exception('Failed in train_flow')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -428,6 +451,14 @@ def predict_flow():
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
         spots = req_json.get('spots')
         res_spots = spots_with_flow(config, spots)
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
+            logger().info('prediction aborted')
+            return jsonify({'spots': [], 'completed': False})
+    except KeyboardInterrupt:
+        logger().info('prediction aborted')
+        return jsonify({'spots': [], 'completed': False})
     except RuntimeError as e:
         logger().exception('Failed in predict_flow')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -549,7 +580,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
-                logger().info('aborted')
+                logger().info('update aborted')
                 return jsonify({'completed': False})
             cnt[spot['tag']] += 1
             centroid = np.array(spot['pos'][::-1])
@@ -790,11 +821,16 @@ def train_seg():
             config.zpath_input, config.zpath_seg_label,
             config.log_interval, config.log_dir, step_offset, epoch_start,
             config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
+            config.memmap_dir,
         ).wait()
-        if (int(redis_client.get(REDIS_KEY_STATE)) ==
-                TrainState.IDLE.value):
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
             logger().info('training aborted')
             return jsonify({'completed': False})
+    except KeyboardInterrupt:
+        logger().info('training aborted')
+        return jsonify({'completed': False})
     except RuntimeError as e:
         logger().exception('Failed in train_seg')
         return jsonify(error=f'Runtime Error: {e}'), 500
@@ -825,8 +861,24 @@ def predict_seg():
         config = SegmentationEvalConfig(req_json)
         logger().info(config)
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
-        spots = detect_spots(config)
+        spots = detect_spots_task.delay(
+            str(config.device), config.model_path, config.keep_axials,
+            config.is_3d, config.crop_size, config.scales,
+            config.cache_maxbytes, config.use_2d, config.use_median,
+            config.patch_size, config.crop_box, config.c_ratio, config.p_thresh,
+            config.r_min, config.r_max, config.output_prediction,
+            config.zpath_input, config.zpath_seg_output, config.timepoint,
+            None, config.memmap_dir, config.batch_size,
+        ).wait()
+        if (redis_client is not None and
+                int(redis_client.get(REDIS_KEY_STATE))
+                == TrainState.IDLE.value):
+            logger().info('prediction aborted')
+            return jsonify({'spots': [], 'completed': False})
         publish_mq('prediction', 'Prediction updated')
+    except KeyboardInterrupt:
+        logger().info('prediction aborted')
+        return jsonify({'spots': [], 'completed': False})
     except RuntimeError as e:
         logger().exception('Failed in detect_spots')
         return jsonify(error=f'Runtime Error: {e}'), 500

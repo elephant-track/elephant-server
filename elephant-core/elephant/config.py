@@ -36,6 +36,7 @@ from elephant.util import get_device
 DATASETS_DIR = '/workspace/datasets'
 MODELS_DIR = '/workspace/models'
 LOGS_DIR = '/workspace/logs'
+MEMMAPS_DIR = '/workspace/memmaps'
 
 ZARR_INPUT = 'imgs.zarr'
 ZARR_SEG_OUTPUT = 'seg_outputs.zarr'
@@ -99,9 +100,10 @@ class BaseConfig():
                                             ZARR_INPUT)
         else:
             self.zpath_input = None
+        self.memmap_dir = MEMMAPS_DIR if config.get('use_memmap') else None
 
     def is_cpu(self):
-        return self.device == 'cpu' or self.device == torch.device('cpu')
+        return str(self.device) == 'cpu'
 
     def __str__(self):
         result = []
@@ -136,12 +138,12 @@ class ExportConfig(BaseConfig):
 class SegmentationEvalConfig(BaseConfig):
     def __init__(self, config):
         super().__init__(config)
-        self.use_median = config.get('use_median')
+        self.use_median = config.get('use_median', False)
         self.is_pad = config.get('is_pad', False)
-        self.c_ratio = config.get('c_ratio')
-        self.p_thresh = config.get('p_thresh')
-        self.r_min = config.get('r_min')
-        self.r_max = config.get('r_max')
+        self.c_ratio = config.get('c_ratio', 0.4)
+        self.p_thresh = config.get('p_thresh', 0.5)
+        self.r_min = config.get('r_min', 0)
+        self.r_max = config.get('r_max', 1e6)
         crop_box = config.get('crop_box')
         if crop_box is not None:
             crop_box = crop_box[:3][::-1] + crop_box[3:][::-1]

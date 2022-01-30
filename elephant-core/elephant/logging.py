@@ -60,11 +60,8 @@ class RabbitMQHandler(logging.StreamHandler):
 def logger():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    if (not logger.handlers or
-            all(not isinstance(h, RabbitMQHandler) for h in logger.handlers)):
-        rmq_handler = RabbitMQHandler()
-        logger.addHandler(rmq_handler)
-        logger.rmq_handler = rmq_handler
+    if (all(not isinstance(h, RabbitMQHandler) for h in logger.handlers)):
+        logger.addHandler(RabbitMQHandler())
     return logger
 
 

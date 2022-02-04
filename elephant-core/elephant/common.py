@@ -138,7 +138,7 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    input_shape = zarr.open(zpath_input, mode='r')[0].shape[-n_dims:]
     dataset = SegmentationDatasetZarr(
         zpath_input,
         zpath_seg_label,
@@ -182,7 +182,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    input_shape = zarr.open(zpath_input, mode='r')[0].shape[-n_dims:]
     dataset = AutoencoderDatasetZarr(
         zpath_input,
         input_shape,
@@ -218,7 +218,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    input_shape = zarr.open(zpath_input, mode='r')[0].shape[-n_dims:]
     dataset = FlowDatasetZarr(
         zpath_input,
         zpath_flow_label,
@@ -763,7 +763,7 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
                     img_input[z] -= slice_median - global_median
         img_input = normalize_zero_one(img_input)
     elif zpath_input is not None:
-        img_input = get_input_at(zarr.open(zpath_input, mode='r'),
+        img_input = get_input_at(zarr.open(zpath_input, mode='r')[0],
                                  timepoint,
                                  memmap_dir=memmap_dir,
                                  use_median=use_median)

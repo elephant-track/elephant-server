@@ -95,9 +95,10 @@ class BaseConfig():
                 self.scales = self.scales[-2:]
             self.crop_size = self.crop_size[-2:]
         if self.dataset_name is not None:
-            self.zpath_input = os.path.join(DATASETS_DIR,
-                                            self.dataset_name,
-                                            ZARR_INPUT)
+            self.zpath_input = config.get('zurl_input',
+                                          os.path.join(DATASETS_DIR,
+                                                       self.dataset_name,
+                                                       ZARR_INPUT))
         else:
             self.zpath_input = None
         self.memmap_dir = MEMMAPS_DIR if config.get('use_memmap') else None

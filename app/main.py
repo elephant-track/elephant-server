@@ -558,12 +558,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                        is_livemode=False):
     if is_livemode:
         assert len(spots_dict.keys()) == 1
-    za_input = zarr.open(zpath_input, mode='r')
+    za_input = zarr.open(zpath_input, mode='r')[0]
     za_label = zarr.open(zpath_seg_label, mode='a')
     za_label_vis = zarr.open(zpath_seg_label_vis, mode='a')
     keyorder = ['tp', 'fp', 'tn', 'fn', 'tb', 'fb']
     MIN_AREA_ELLIPSOID = 9
-    img_shape = za_input.shape[1:]
+    img_shape = za_input.shape[2:]
     n_dims = len(img_shape)
     for t, spots in spots_dict.items():
         label_indices = set()

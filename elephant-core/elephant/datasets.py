@@ -57,7 +57,7 @@ if not PROFILE:
 
 
 def _load_image(za_input, timepoint, use_median=False):
-    img = za_input[timepoint].astype('float32')
+    img = za_input[timepoint][0].astype('float32')
     if use_median and img.ndim == 3:
         global_median = np.median(img)
         for z in range(img.shape[0]):
@@ -76,9 +76,9 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
             fpath.parent.mkdir(parents=True, exist_ok=True)
             img = _load_image(za, timepoint, use_median)
             np.memmap(fpath, dtype='float32', mode='w+',
-                      shape=za.shape[1:])[:] = img
+                      shape=za.shape[2:])[:] = img
         return np.memmap(fpath, dtype='float32', mode='c',
-                         shape=za.shape[1:])
+                         shape=za.shape[2:])
     return _load_image(za, timepoint, use_median)
 
 
@@ -174,7 +174,7 @@ class SegmentationDatasetZarr(du.Dataset):
             scale_factor_base * min(scales) / scales[i]
             for i in range(self.n_dims)
         )
-        self.za_input = zarr.open(zpath_input, mode='r')
+        self.za_input = zarr.open(zpath_input, mode='r')[0]
         crop_size = tuple(
             min(crop_size[i], img_size[i]) for i in range(self.n_dims))
         self.img_size = img_size

@@ -183,6 +183,7 @@ def check_dataset(dataset, shape):
     """
     p = Path(dataset)
     message = 'ready'
+    return message
     try:
         try:
             img = zarr.open(str(p / 'imgs.zarr'), 'r')

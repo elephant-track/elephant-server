@@ -122,16 +122,26 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
     if not torch.cuda.is_available():
         is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
-    mp.spawn(run_train_seg,
-             args=(world_size, spot_indices, batch_size, crop_size,
-                   class_weights, false_weight, model_path, n_epochs,
-                   keep_axials, scales, lr, n_crops, is_3d, is_livemode,
-                   scale_factor_base, rotation_angle, zpath_input,
-                   zpath_seg_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
-                   memmap_dir),
-             nprocs=world_size,
-             join=True)
+    if 1 < world_size:
+        mp.spawn(run_train_seg,
+                 args=(world_size, spot_indices, batch_size, crop_size,
+                       class_weights, false_weight, model_path, n_epochs,
+                       keep_axials, scales, lr, n_crops, is_3d, is_livemode,
+                       scale_factor_base, rotation_angle, zpath_input,
+                       zpath_seg_label, log_interval, log_dir, step_offset,
+                       epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
+                       memmap_dir),
+                 nprocs=world_size,
+                 join=True)
+    else:
+        run_train_seg(torch.device('cpu') if is_cpu else torch.device('cuda'),
+                      world_size, spot_indices, batch_size, crop_size,
+                      class_weights, false_weight, model_path, n_epochs,
+                      keep_axials, scales, lr, n_crops, is_3d, is_livemode,
+                      scale_factor_base, rotation_angle, zpath_input,
+                      zpath_seg_label, log_interval, log_dir, step_offset,
+                      epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
+                      memmap_dir)
 
 
 @ celery.task()
@@ -144,15 +154,24 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
     if not torch.cuda.is_available():
         is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
-    mp.spawn(run_train_flow,
-             args=(world_size, spot_indices, batch_size, crop_size, model_path,
-                   n_epochs, keep_axials, scales, lr, n_crops, is_3d,
-                   scale_factor_base, rotation_angle, zpath_input,
-                   zpath_flow_label, log_interval, log_dir, step_offset,
-                   epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
-                   memmap_dir),
-             nprocs=world_size,
-             join=True)
+    if 1 < world_size:
+        mp.spawn(run_train_flow,
+                 args=(world_size, spot_indices, batch_size, crop_size,
+                       model_path, n_epochs, keep_axials, scales, lr,
+                       n_crops, is_3d, scale_factor_base, rotation_angle,
+                       zpath_input, zpath_flow_label, log_interval, log_dir,
+                       step_offset, epoch_start, is_cpu, is_mixed_precision,
+                       cache_maxbytes, memmap_dir),
+                 nprocs=world_size,
+                 join=True)
+    else:
+        run_train_flow(torch.device('cpu') if is_cpu else torch.device('cuda'),
+                       world_size, spot_indices, batch_size, crop_size,
+                       model_path, n_epochs, keep_axials, scales, lr,
+                       n_crops, is_3d, scale_factor_base, rotation_angle,
+                       zpath_input, zpath_flow_label, log_interval, log_dir,
+                       step_offset, epoch_start, is_cpu, is_mixed_precision,
+                       cache_maxbytes, memmap_dir)
 
 
 @ celery.task()

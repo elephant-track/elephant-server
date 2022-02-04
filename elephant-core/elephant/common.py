@@ -694,7 +694,7 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                     prediction[data_inds[index]][tuple(slices)] += (
                         y[index] * patch_weight
                     )
-        except RuntimeError:
+        except FileNotFoundError:
             raise KeyboardInterrupt
     return prediction
 
@@ -814,6 +814,7 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
         return []
     except Exception:
         logger().exception('Failed in detect_spots')
+        return []
     finally:
         torch.cuda.empty_cache()
 

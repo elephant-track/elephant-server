@@ -155,7 +155,7 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
         memmap_dir=memmap_dir,
     )
     loader = du.DataLoader(dataset, batch_size=batch_size,
-                           shuffle=True, num_workers=world_size*2)
+                           shuffle=True, num_workers=0)
     run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
               n_epochs, model_path, is_livemode, log_interval=log_interval,
               log_dir=log_dir, step_offset=step_offset, epoch_start=epoch_start,
@@ -195,7 +195,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
         memmap_dir=memmap_dir,
     )
     loader = du.DataLoader(dataset, batch_size=1,
-                           shuffle=True, num_workers=1)
+                           shuffle=True, num_workers=0)
     run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
               n_epochs, model_path, log_interval=log_interval, log_dir=log_dir,
               step_offset=step_offset, epoch_start=epoch_start, is_cpu=is_cpu,
@@ -233,7 +233,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
         cache_maxbytes=cache_maxbytes,
         memmap_dir=memmap_dir,
     )
-    loader = du.DataLoader(dataset, batch_size=batch_size)
+    loader = du.DataLoader(dataset, batch_size=batch_size, num_workers=0)
     run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
               n_epochs, model_path, log_interval=log_interval, log_dir=log_dir,
               step_offset=step_offset, epoch_start=epoch_start, is_cpu=is_cpu,
@@ -549,7 +549,8 @@ def to_ddp_loader(loader, num_replicas, rank, shuffle):
                                     shuffle=shuffle)
     return du.DataLoader(loader.dataset,
                          batch_size=loader.batch_size,
-                         sampler=sampler)
+                         sampler=sampler,
+                         num_workers=0)
 
 
 def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
@@ -671,7 +672,7 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                                             patch_list,
                                             keep_axials)
     loader = du.DataLoader(dataset, batch_size=batch_size,
-                           shuffle=False, num_workers=2)
+                           shuffle=False, num_workers=0)
     if is_dp and str(device) != 'cpu' and 1 < torch.cuda.device_count():
         model = torch.nn.DataParallel(model)
     model.to(device)

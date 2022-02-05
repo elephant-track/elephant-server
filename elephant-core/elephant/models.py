@@ -178,13 +178,13 @@ class UNet(nn.Module):
             base_size = (2**z_poolings, 16, 16)
         else:
             base_size = (16, 16)
+        # resize if required
+        x, is_resized = self._conform(input, base_size)
         # pad if specified
         if self.is_pad:
             # the order for pad size is (left, right, top, bottom, front, back)
             pad_size = sum([[x//2, ] * 2 for x in base_size[::-1]], [])
             input = F.pad(input, pad_size, 'replicate')
-        # resize if required
-        x, is_resized = self._conform(input, base_size)
         # apply encoder path
         encoder_out = []
         for level in range(self.depth):
@@ -213,18 +213,19 @@ class UNet(nn.Module):
         x = self.out_conv(x)
         if self.activation is not None:
             x = self.activation(x)
-        # put back to the original size
-        if is_resized:
-            x = F.interpolate(x,
-                              self.org_size,
-                              mode=self.interpolate_mode,
-                              align_corners=True)
+        # remove pad if specified
         if self.is_pad:
             slices = (slice(None), slice(None)) + tuple(
                 slice(self.pad_size[-(2+2*i)], -self.pad_size[-(1+2*i)])
                 for i in range(self.n_dims)
             )
             x = x[slices]
+        # put back to the original size
+        if is_resized:
+            x = F.interpolate(x,
+                              self.org_size,
+                              mode=self.interpolate_mode,
+                              align_corners=True)
         return x
 
     @ classmethod

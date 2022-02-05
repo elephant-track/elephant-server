@@ -50,10 +50,10 @@ def get_pad_size(size, base):
 
 
 def normalize_zero_one(data):
-    if data.min() == data.max():
-        return data
     data -= data.min()
-    data /= data.max()
+    data_max = data.max()
+    if 0 < data_max:
+        data /= data_max
     return data
 
 

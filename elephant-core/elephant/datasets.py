@@ -378,9 +378,9 @@ class SegmentationDatasetZarr(du.Dataset):
 
             sliced_input = img_input[slices].copy()
 
-            if not self.is_ae and self.contrast:
-                fg_index = np.isin(sliced_label, (1, 2, 4, 5))
-                bg_index = np.isin(sliced_label, (0, 3))
+            if not self.is_ae and 0 < self.contrast:
+                fg_index = np.isin(sliced_label, (2, 3, 5, 6))
+                bg_index = np.isin(sliced_label, (1, 4))
                 if fg_index.any() and bg_index.any():
                     fg_mean = sliced_input[fg_index].mean()
                     bg_mean = sliced_input[bg_index].mean()

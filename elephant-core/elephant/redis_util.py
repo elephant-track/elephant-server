@@ -28,6 +28,8 @@ from enum import Enum
 
 import redis
 
+from elephant.util import RUN_ON_FLASK
+
 REDIS_KEY_LR = 'lr'
 REDIS_KEY_NCROPS = 'n_crops'
 REDIS_KEY_STATE = 'state'
@@ -42,4 +44,7 @@ class TrainState(Enum):
     WAIT = 2
 
 
-redis_client = redis.Redis.from_url('redis://localhost:6379/0')
+if RUN_ON_FLASK:
+    redis_client = redis.Redis.from_url('redis://localhost:6379/0')
+else:
+    redis_client = None

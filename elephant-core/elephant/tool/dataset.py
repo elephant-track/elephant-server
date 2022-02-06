@@ -98,7 +98,7 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         str(p / 'imgs.zarr'),
         'w',
         shape=(n_timepoints,) + shape,
-        chunks=(1,) + shape,
+        chunks=(1,) + chunk_shape,
         dtype='u2' if is_uint16 else 'u1'
     )
     zarr.open(

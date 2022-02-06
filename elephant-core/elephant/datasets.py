@@ -74,11 +74,13 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
         logger().info(f'loading from {fpath}')
         if not fpath.exists():
             fpath.parent.mkdir(parents=True, exist_ok=True)
-            img = _load_image(za, timepoint, use_median)
-            np.memmap(fpath, dtype='float32', mode='w+',
-                      shape=za.shape[1:])[:] = img
-        return np.memmap(fpath, dtype='float32', mode='c',
-                         shape=za.shape[1:])
+            np.memmap(
+                fpath,
+                dtype='float32',
+                mode='w+',
+                shape=za.shape[1:]
+            )[:] = _load_image(za, timepoint, use_median)
+        return np.memmap(fpath, dtype='float32', mode='c', shape=za.shape[1:])
     return _load_image(za, timepoint, use_median)
 
 
@@ -222,6 +224,8 @@ class SegmentationDatasetZarr(du.Dataset):
             self.cache_dict_label = LRUCacheDict(cache_maxbytes // 2)
         else:
             self.use_cache = False
+            self.cache_dict_input = None
+            self.cache_dict_label = None
         self.memmap_dir = memmap_dir
 
     def __len__(self):
@@ -231,18 +235,36 @@ class SegmentationDatasetZarr(du.Dataset):
             return self.n_crops
         return len(self.indices) * self.n_crops
 
+    def _get_memmap_or_load_label(self, timepoint):
+        if self.memmap_dir:
+            key = (f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
+                   + '-seglabel')
+            fpath = Path(self.memmap_dir) / f'{key}.dat'
+            logger().info(f'loading from {fpath}')
+            if not fpath.exists():
+                fpath.parent.mkdir(parents=True, exist_ok=True)
+                np.memmap(
+                    fpath,
+                    dtype='uint8',
+                    mode='w+',
+                    shape=self.za_label.shape[1:]
+                )[:] = self.za_label[timepoint]
+            return np.memmap(fpath, dtype='uint8', mode='c',
+                             shape=self.za_label.shape[1:])
+        return self.za_label[timepoint]
+
     def _get_label_at(self, ind):
         if self.use_cache:
             key = f'{self.za_label.store.path}:{ind}'
             cache = self.cache_dict_label.get(key)
             if cache is None:
-                label = self.za_label[ind].astype('int64')
+                label = self._get_memmap_or_load_label(ind)
                 assert 0 < label.max(), (
                     'positive weight should exist in the label'
                 )
                 cache = self.cache_dict_label.get(key, label)
             return cache
-        label = self.za_label[ind].astype('int64')
+        label = self._get_memmap_or_load_label(ind)
         assert 0 < label.max(), (
             'positive weight should exist in the label'
         )

@@ -143,10 +143,29 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     )
     dtype = np.uint16 if is_uint16 else np.uint8
     for t, timepoint in tqdm(enumerate(timepoints)):
-        # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
-        img[int(timepoint[1:])] = (
-            np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
-        ).astype(dtype)
+        if n_dims == 2:
+            chunks = tuple(
+                (slice(None),
+                 slice(y, y+chunk_shape[-2]),
+                 slice(x, x+chunk_shape[-1]))
+                for y in range(0, shape[-2], chunk_shape[-2])
+                for x in range(0, shape[-1], chunk_shape[-1])
+            )
+        else:
+            chunks = tuple(
+                (slice(z, z+chunk_shape[-3]),
+                 slice(y, y+chunk_shape[-2]),
+                 slice(x, x+chunk_shape[-1]))
+                for z in range(0, shape[-3], chunk_shape[-3])
+                for y in range(0, shape[-2], chunk_shape[-2])
+                for x in range(0, shape[-1], chunk_shape[-1])
+            )
+        for chunk in chunks:
+            # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
+            img[(int(timepoint[1:]),) + chunk[-n_dims:]] = (
+                np.array(func(f[timepoint]['s00']['0']['cells'][chunk])) //
+                divisor
+            ).astype(dtype)
         if is_message_queue:
             publish_mq('dataset', json.dumps({'t_max': n_timepoints,
                                               't_current': t + 1, }))

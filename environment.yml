@@ -245,14 +245,14 @@ dependencies:
   - yaml=0.1.7=had09818_2
   - yaml-cpp=0.6.3=he1b5a44_4
   - yarl=1.6.3=py37h27cfd23_0
-  - zarr=2.4.0=py_0
+  - zarr=2.11.0=pyhd8ed1ab_0
   - zfp=0.5.5=h2531618_6
   - zipp=3.6.0=pyhd3eb1b0_0
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.5.0=ha95c52a_0
   - pip:
     - dnspython==2.1.0
-    - python-etcd==0.4.5
-    - torchelastic==0.2.0
     - ./elephant-core
     - nvsmi==0.4.2
+    - python-etcd==0.4.5
+    - torchelastic==0.2.0

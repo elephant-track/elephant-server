@@ -31,6 +31,7 @@ from random import uniform
 from random import randint
 from random import randrange
 
+from filelock import FileLock
 import numpy as np
 from skimage.transform import rotate
 import torch
@@ -71,16 +72,24 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
     if memmap_dir:
         key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
         fpath = Path(memmap_dir) / f'{key}.dat'
-        logger().info(f'loading from {fpath}')
-        if not fpath.exists():
-            fpath.parent.mkdir(parents=True, exist_ok=True)
-            np.memmap(
+        lock = FileLock(str(fpath) + '.lock')
+        with lock:
+            if not fpath.exists():
+                logger().info(f'creating {fpath}')
+                fpath.parent.mkdir(parents=True, exist_ok=True)
+                np.memmap(
+                    fpath,
+                    dtype='float32',
+                    mode='w+',
+                    shape=za.shape[1:]
+                )[:] = _load_image(za, timepoint, use_median)
+            logger().info(f'loading from {fpath}')
+            return np.memmap(
                 fpath,
                 dtype='float32',
-                mode='w+',
+                mode='c',
                 shape=za.shape[1:]
-            )[:] = _load_image(za, timepoint, use_median)
-        return np.memmap(fpath, dtype='float32', mode='c', shape=za.shape[1:])
+            )
     return _load_image(za, timepoint, use_median)
 
 
@@ -240,17 +249,24 @@ class SegmentationDatasetZarr(du.Dataset):
             key = (f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
                    + '-seglabel')
             fpath = Path(self.memmap_dir) / f'{key}.dat'
-            logger().info(f'loading from {fpath}')
-            if not fpath.exists():
-                fpath.parent.mkdir(parents=True, exist_ok=True)
-                np.memmap(
+            lock = FileLock(str(fpath) + '.lock')
+            with lock:
+                if not fpath.exists():
+                    logger().info(f'creating {fpath}')
+                    fpath.parent.mkdir(parents=True, exist_ok=True)
+                    np.memmap(
+                        fpath,
+                        dtype='uint8',
+                        mode='w+',
+                        shape=self.za_label.shape[1:]
+                    )[:] = self.za_label[timepoint]
+                logger().info(f'loading from {fpath}')
+                return np.memmap(
                     fpath,
                     dtype='uint8',
-                    mode='w+',
+                    mode='c',
                     shape=self.za_label.shape[1:]
-                )[:] = self.za_label[timepoint]
-            return np.memmap(fpath, dtype='uint8', mode='c',
-                             shape=self.za_label.shape[1:])
+                )
         return self.za_label[timepoint]
 
     def _get_label_at(self, ind):
@@ -346,11 +362,12 @@ class SegmentationDatasetZarr(du.Dataset):
                 item_crop_size = [min(img_input.shape[i], item_crop_size[i])
                                   for i in range(self.n_dims)]
             if not self.is_ae:
-                index_pool = self.za_label.attrs.get(
+                za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+                index_pool = za_label_a.attrs.get(
                     f'label.indices.{i_frame}')
                 if index_pool is None:
                     index_pool = np.argwhere(0 < img_label)
-                    self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
+                    za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
                         map(tuple, index_pool.tolist())
                     )
             if self.is_ae:
@@ -682,10 +699,11 @@ class FlowDatasetZarr(du.Dataset):
                     item_crop_size[i] = math.ceil(item_crop_size[i])
                 item_crop_size = [min(img_input.shape[i], item_crop_size[i])
                                   for i in range(self.n_dims)]
-            index_pool = self.za_label.attrs.get(f'label.indices.{i_frame}')
+            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+            index_pool = za_label_a.attrs.get(f'label.indices.{i_frame}')
             if index_pool is None:
                 index_pool = np.argwhere(0 < img_label[-1])
-                self.za_label.attrs[f'label.indices.{i_frame}'] = tuple(
+                za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
                     map(tuple, index_pool.tolist())
                 )
             base_index = index_pool[randrange(len(index_pool))]

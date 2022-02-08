@@ -988,7 +988,6 @@ def spots_with_flow(config, spots):
     return res_spots
 
 
-@profile
 def _region_to_spot(min_area, scales, origins, n_dims, use_2d, c_ratio, idx,
                     r_min, r_max, i_frame, props):
     area, centroid, bbox, image = props

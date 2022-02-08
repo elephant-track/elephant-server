@@ -28,9 +28,27 @@ from collections import OrderedDict
 import os
 import sys
 
+import numpy as np
 import torch
 
 RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
+
+
+def to_fancy_index(*data):
+    """Build fancy index with broadcast.
+
+    Parameters
+    ----------
+    *data : int, ndarray
+        Indices to be used for building fancy index.
+
+    Example
+    -------
+    >>> to_fancy_index(0, np.array([1, 1]), np.array([2, 2]), 3)
+    (array([0, 0]), array([1, 1]), array([2, 2]), array([3, 3]))
+
+    """
+    return tuple(np.column_stack(tuple(np.broadcast(*data))))
 
 
 def get_next_multiple(value, base):

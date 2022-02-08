@@ -33,6 +33,7 @@ import tempfile
 import weakref
 
 from celery import Celery
+from filelock import FileLock
 from flask import Flask
 from flask import g
 from flask import jsonify
@@ -66,6 +67,7 @@ from elephant.config import FlowTrainConfig
 from elephant.config import ResetConfig
 from elephant.config import SegmentationEvalConfig
 from elephant.config import SegmentationTrainConfig
+from elephant.datasets import get_input_at
 from elephant.logging import logger
 from elephant.logging import publish_mq
 from elephant.redis_util import REDIS_KEY_LR
@@ -76,8 +78,8 @@ from elephant.redis_util import REDIS_KEY_UPDATE_ONGOING_FLOW
 from elephant.redis_util import REDIS_KEY_UPDATE_ONGOING_SEG
 from elephant.redis_util import TrainState
 from elephant.tool import dataset as dstool
-from elephant.util import normalize_zero_one
 from elephant.util import get_device
+from elephant.util import to_fancy_index
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 
@@ -574,7 +576,7 @@ def _dilate_3d_indices(dd, rr, cc, shape):
 
 def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                        zpath_seg_label_vis, auto_bg_thresh=0, c_ratio=0.5,
-                       is_livemode=False):
+                       is_livemode=False, memmap_dir=None):
     if is_livemode:
         assert len(spots_dict.keys()) == 1
     za_input = zarr.open(zpath_input, mode='r')
@@ -584,17 +586,26 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     MIN_AREA_ELLIPSOID = 9
     img_shape = za_input.shape[1:]
     n_dims = len(img_shape)
+    keybase = Path(za_label.store.path).parent.name
     for t, spots in spots_dict.items():
         label_indices = set()
         if 0 < auto_bg_thresh:
             label = np.where(
-                normalize_zero_one(za_input[t].astype(
-                    'float32')) < auto_bg_thresh,
+                get_input_at(
+                    za_input, t, memmap_dir=memmap_dir
+                ) < auto_bg_thresh,
                 1,
                 0
             ).astype('uint8')
+            label_indices.update(
+                tuple(map(tuple, np.stack(np.nonzero(label), axis=1).tolist()))
+            )
         else:
             label = np.zeros(img_shape, dtype='uint8')
+        for chunk in Path(za_label.store.path).glob(f'{t}.*'):
+            chunk.unlink()
+        for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
+            chunk.unlink()
         label_vis = np.zeros(img_shape + (3,), dtype='uint8')
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
@@ -619,11 +630,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 radii,
                 rotation,
                 scales,
-                label.shape,
+                img_shape,
                 MIN_AREA_ELLIPSOID
             )
             label_indices.update(
-                tuple(map(tuple, np.stack(indices_outer, axis=1).tolist())))
+                tuple(map(tuple, np.stack(indices_outer, axis=1).tolist()))
+            )
             if spot['tag'] in ['tp', 'tb', 'tn']:
                 label_offset = 0
                 label_vis_value = 255
@@ -637,10 +649,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     radii * c_ratio,
                     rotation,
                     scales,
-                    label.shape,
+                    img_shape,
                     MIN_AREA_ELLIPSOID
                 )
-                indices_inner_p = dilate_func(*indices_inner, label.shape)
+                indices_inner_p = dilate_func(*indices_inner, img_shape)
                 label[indices_outer] = np.where(
                     cond_outer_1,
                     2 + label_offset,
@@ -689,10 +701,23 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
+        if memmap_dir:
+            fpath = Path(memmap_dir) / f'{keybase}-t{t}-seglabel.dat'
+            lock = FileLock(str(fpath) + '.lock')
+            with lock:
+                if fpath.exists():
+                    logger().info(f'remove {fpath}')
+                    fpath.unlink()
+        target = tuple(np.array(list(label_indices)).T)
+        target_t = to_fancy_index(t, *target)
+        target_vis = tuple(
+            np.column_stack([to_fancy_index(*target, c) for c in range(3)])
+        )
+        target_vis_t = to_fancy_index(t, *target_vis)
+        za_label[target_t] = label[target]
+        za_label_vis[target_vis_t] = label_vis[target_vis]
         za_label.attrs[f'label.indices.{t}'] = list(label_indices)
         za_label.attrs['updated'] = True
-        za_label[t] = label
-        za_label_vis[t] = label_vis
         if is_livemode:
             if redis_client.get(REDIS_KEY_TIMEPOINT):
                 msg = 'Last update/training is ongoing'
@@ -753,7 +778,7 @@ def update_seg_labels():
             msg = 'nothing to update'
             logger().error(msg)
             return jsonify(error=msg), 400
-        if len(spots_dict.keys()) != 1:
+        if config.is_livemode and len(spots_dict.keys()) != 1:
             msg = 'Livemode should update only a single timepoint'
             logger().error(msg)
             return jsonify(error=msg), 400
@@ -767,7 +792,8 @@ def update_seg_labels():
                                           config.zpath_seg_label_vis,
                                           config.auto_bg_thresh,
                                           config.c_ratio,
-                                          config.is_livemode)
+                                          config.is_livemode,
+                                          memmap_dir=config.memmap_dir)
         except RuntimeError as e:
             logger().exception('Failed in _update_seg_labels')
             return jsonify(error=f'Runtime Error: {e}'), 500
@@ -820,7 +846,8 @@ def train_seg():
                                config.zpath_seg_label,
                                config.zpath_seg_label_vis,
                                config.auto_bg_thresh,
-                               config.c_ratio)
+                               config.c_ratio,
+                               memmap_dir=config.memmap_dir)
         step_offset = 0
         for path in sorted(Path(config.log_dir).glob('event*')):
             try:

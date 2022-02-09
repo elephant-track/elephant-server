@@ -100,7 +100,11 @@ class BaseConfig():
                                             ZARR_INPUT)
         else:
             self.zpath_input = None
-        self.memmap_dir = MEMMAPS_DIR if config.get('use_memmap') else None
+        if config.get('use_memmap'):
+            self.memmap_dir = MEMMAPS_DIR
+            Path(self.memmap_dir).mkdir(parents=True, exist_ok=True)
+        else:
+            self.memmap_dir = None
 
     def is_cpu(self):
         return str(self.device) == 'cpu'

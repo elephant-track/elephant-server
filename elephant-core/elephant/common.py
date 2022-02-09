@@ -582,7 +582,7 @@ def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
 
 
 def _patch_predict(model, device, input, keep_axials, patch_size, func,
-                   is_logging=True, batch_size=1, is_dp=True):
+                   is_logging=True, batch_size=1, is_dp=True, memmap_dir=None):
     n_dims = len(patch_size)
     input_shape = input.shape[-n_dims:]
     n_data = input.shape[0]
@@ -667,8 +667,14 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                 if n_dims == 2:
                     patch_weight_zyx = patch_weight_zyx[0]
                 patch_list.append((slices, patch_weight_zyx))
-    prediction = np.zeros((n_data, out_channels,) + input_shape,
-                          dtype='float32')
+    if memmap_dir:
+        prediction = np.memmap(str(Path(memmap_dir) / 'prediction.dat'),
+                               dtype='float32',
+                               mode='w+',
+                               shape=(n_data, out_channels,) + input_shape)
+    else:
+        prediction = np.zeros((n_data, out_channels,) + input_shape,
+                              dtype='float32')
     dataset = SegmentationDatasetPrediction(input,
                                             patch_list,
                                             keep_axials)
@@ -702,17 +708,19 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
 
 
 def predict(model, device, input, keep_axials, patch_size=None,
-            is_logarithm=True, is_logging=True, batch_size=1, is_dp=True):
+            is_logarithm=True, is_logging=True, batch_size=1, is_dp=True,
+            memmap_dir=None):
     func = (lambda x: np.exp(x)) if is_logarithm else (lambda x: x)
     if patch_size is None:
         patch_size = input.shape[2:]
     return _patch_predict(model, device, input, keep_axials, patch_size,
                           func, is_logging, batch_size=batch_size,
-                          is_dp=is_dp)
+                          is_dp=is_dp, memmap_dir=memmap_dir)
 
 
 def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
-                        crop_box=None, is_logging=True, batch_size=1):
+                        crop_box=None, is_logging=True, batch_size=1,
+                        memmap_dir=None):
     if crop_box is not None:
         slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
                   slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
@@ -729,7 +737,8 @@ def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
                                       patch_size,
                                       is_logarithm=True,
                                       is_logging=is_logging,
-                                      batch_size=batch_size)[0]
+                                      batch_size=batch_size,
+                                      memmap_dir=memmap_dir)[0]
                               for model in models], axis=0)
     if img.ndim == 3:
         for z in range(prediction.shape[1]):
@@ -789,7 +798,8 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
                                     device,
                                     patch_size[-2:],
                                     crop_box,
-                                    batch_size=batch_size)
+                                    batch_size=batch_size,
+                                    memmap_dir=memmap_dir)
                 for z in range(img_input.shape[0])
             ]), 0, 1)
         else:
@@ -799,7 +809,8 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
                                              device,
                                              patch_size,
                                              crop_box,
-                                             batch_size=batch_size)
+                                             batch_size=batch_size,
+                                             memmap_dir=memmap_dir)
         spots = []
         _find_and_push_spots(spots,
                              timepoint,

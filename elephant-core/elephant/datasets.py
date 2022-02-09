@@ -128,7 +128,7 @@ class SegmentationDatasetPrediction(du.Dataset):
         data_ind = index // len(self.patch_list)
         patch_ind = index % len(self.patch_list)
         slices, _ = self.patch_list[patch_ind]
-        return (self.input[data_ind][slices],
+        return (self.input[(data_ind,) + tuple(slices)],
                 self.keep_axials[data_ind], data_ind, patch_ind)
 
 

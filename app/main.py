@@ -309,9 +309,10 @@ def _update_flow_labels(spots_dict,
             weight = 1  # if spot['tag'] in ['tp'] else false_weight
             displacement = spot['displacement']  # X, Y, Z
             for i in range(n_dims):
-                label[i][indices] = (
+                label[to_fancy_index(i, *indices)] = (
                     displacement[i] / scales[-1 - i] / flow_norm_factor[i])
-            label[-1][indices] = weight  # last channels is for weight
+            # last channels is for weight
+            label[to_fancy_index(-1, *indices)] = weight
             label_indices.update(
                 tuple(map(tuple, np.stack(indices, axis=1).tolist())))
         logger().info(f'frame:{t+1}, {len(spots)} linkings')
@@ -658,23 +659,24 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[..., 1][indices_outer] = np.where(
+                label_vis[to_fancy_index(*indices_outer, 1)] = np.where(
                     cond_outer_1,
                     label_vis_value,
-                    label_vis[..., 1][indices_outer]
+                    label_vis[to_fancy_index(*indices_outer, 1)]
                 )
                 label[indices_inner_p] = 2 + label_offset
-                label_vis[..., 1][indices_inner_p] = label_vis_value
+                label_vis[
+                    to_fancy_index(*indices_inner_p, 1)] = label_vis_value
                 cond_inner = np.fmod(label[indices_inner] - 1, 3) <= 2
                 label[indices_inner] = np.where(
                     cond_inner,
                     3 + label_offset,
                     label[indices_inner]
                 )
-                label_vis[..., 2][indices_inner] = np.where(
+                label_vis[to_fancy_index(*indices_inner, 2)] = np.where(
                     cond_inner,
                     label_vis_value,
-                    label_vis[..., 2][indices_inner]
+                    label_vis[to_fancy_index(*indices_inner, 2)]
                 )
             elif spot['tag'] in ('tb', 'fb'):
                 label[indices_outer] = np.where(
@@ -682,10 +684,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[..., 1][indices_outer] = np.where(
+                label_vis[to_fancy_index(*indices_outer, 1)] = np.where(
                     cond_outer_1,
                     label_vis_value,
-                    label_vis[..., 1][indices_outer]
+                    label_vis[to_fancy_index(*indices_outer, 1)]
                 )
             elif spot['tag'] in ('tn', 'fp'):
                 cond_outer_0 = np.fmod(label[indices_outer] - 1, 3) <= 0
@@ -694,10 +696,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     1 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[..., 0][indices_outer] = np.where(
+                label_vis[to_fancy_index(*indices_outer, 0)] = np.where(
                     cond_outer_0,
                     label_vis_value,
-                    label_vis[..., 0][indices_outer]
+                    label_vis[to_fancy_index(*indices_outer, 0)]
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))

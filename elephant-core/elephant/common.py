@@ -693,7 +693,7 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                 y = func(model(x, kas).detach().cpu().numpy())
                 for index in range(len(y)):
                     slices, patch_weight = patch_list[patch_inds[index]]
-                    prediction[data_inds[index]][tuple(slices)] += (
+                    prediction[(data_inds[index],) + tuple(slices)] += (
                         y[index] * patch_weight
                     )
         except FileNotFoundError:

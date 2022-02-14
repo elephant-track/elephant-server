@@ -420,7 +420,7 @@ def train_flow():
             except Exception:
                 pass
         epoch_start = 0
-        train_flow_task.delay(
+        async_result = train_flow_task.delay(
             list(spots_dict.keys()), config.batch_size, config.crop_size,
             config.model_path, config.n_epochs, config.keep_axials,
             config.scales, config.lr, config.n_crops, config.is_3d,
@@ -429,18 +429,13 @@ def train_flow():
             config.log_interval, config.log_dir, step_offset, epoch_start,
             config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
             config.memmap_dir,
-        ).wait()
-        if (redis_client is not None and
+        )
+        while not async_result.ready():
+            if (redis_client is not None and
                 int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
-            logger().info('training aborted')
-            return jsonify({'completed': False})
-    except KeyboardInterrupt:
-        logger().info('training aborted')
-        return jsonify({'completed': False})
-    except RuntimeError as e:
-        logger().exception('Failed in train_flow')
-        return jsonify(error=f'Runtime Error: {e}'), 500
+                    == TrainState.IDLE.value):
+                logger().info('training aborted')
+                return jsonify({'completed': False})
     except Exception as e:
         logger().exception('Failed in train_flow')
         return jsonify(error=f'Exception: {e}'), 500
@@ -603,16 +598,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             )
         else:
             label = np.zeros(img_shape, dtype='uint8')
-        for chunk in Path(za_label.store.path).glob(f'{t}.*'):
-            chunk.unlink()
-        for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
-            chunk.unlink()
         label_vis = np.zeros(img_shape + (3,), dtype='uint8')
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
             if int(redis_client.get(REDIS_KEY_STATE)) == TrainState.IDLE.value:
                 logger().info('update aborted')
-                return jsonify({'completed': False})
+                raise KeyboardInterrupt
             cnt[spot['tag']] += 1
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
@@ -703,6 +694,20 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
+        target = tuple(np.array(list(label_indices)).T)
+        target_t = to_fancy_index(t, *target)
+        target_vis = tuple(
+            np.column_stack([to_fancy_index(*target, c) for c in range(3)])
+        )
+        target_vis_t = to_fancy_index(t, *target_vis)
+        for chunk in Path(za_label.store.path).glob(f'{t}.*'):
+            chunk.unlink()
+        for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
+            chunk.unlink()
+        za_label[target_t] = label[target]
+        za_label_vis[target_vis_t] = label_vis[target_vis]
+        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
+        za_label.attrs['updated'] = True
         if memmap_dir:
             fpath = Path(memmap_dir) / f'{keybase}-t{t}-seglabel.dat'
             lock = FileLock(str(fpath) + '.lock')
@@ -710,16 +715,6 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 if fpath.exists():
                     logger().info(f'remove {fpath}')
                     fpath.unlink()
-        target = tuple(np.array(list(label_indices)).T)
-        target_t = to_fancy_index(t, *target)
-        target_vis = tuple(
-            np.column_stack([to_fancy_index(*target, c) for c in range(3)])
-        )
-        target_vis_t = to_fancy_index(t, *target_vis)
-        za_label[target_t] = label[target]
-        za_label_vis[target_vis_t] = label_vis[target_vis]
-        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
-        za_label.attrs['updated'] = True
         if is_livemode:
             if redis_client.get(REDIS_KEY_TIMEPOINT):
                 msg = 'Last update/training is ongoing'
@@ -796,9 +791,8 @@ def update_seg_labels():
                                           config.c_ratio,
                                           config.is_livemode,
                                           memmap_dir=config.memmap_dir)
-        except RuntimeError as e:
-            logger().exception('Failed in _update_seg_labels')
-            return jsonify(error=f'Runtime Error: {e}'), 500
+        except KeyboardInterrupt:
+            return jsonify({'completed': False})
         except Exception as e:
             logger().exception('Failed in _update_seg_labels')
             return jsonify(error=f'Exception: {e}'), 500
@@ -842,14 +836,17 @@ def train_seg():
         if config.is_livemode:
             redis_client.delete(REDIS_KEY_TIMEPOINT)
         else:
-            _update_seg_labels(spots_dict,
-                               config.scales,
-                               config.zpath_input,
-                               config.zpath_seg_label,
-                               config.zpath_seg_label_vis,
-                               config.auto_bg_thresh,
-                               config.c_ratio,
-                               memmap_dir=config.memmap_dir)
+            try:
+                _update_seg_labels(spots_dict,
+                                   config.scales,
+                                   config.zpath_input,
+                                   config.zpath_seg_label,
+                                   config.zpath_seg_label_vis,
+                                   config.auto_bg_thresh,
+                                   config.c_ratio,
+                                   memmap_dir=config.memmap_dir)
+            except KeyboardInterrupt:
+                return jsonify({'completed': False})
         step_offset = 0
         for path in sorted(Path(config.log_dir).glob('event*')):
             try:
@@ -859,7 +856,7 @@ def train_seg():
             except Exception:
                 pass
         epoch_start = 0
-        train_seg_task.delay(
+        async_result = train_seg_task.delay(
             list(spots_dict.keys()), config.batch_size,
             config.crop_size, config.class_weights,
             config.false_weight, config.model_path, config.n_epochs,
@@ -870,18 +867,13 @@ def train_seg():
             config.log_interval, config.log_dir, step_offset, epoch_start,
             config.is_cpu(), config.is_mixed_precision, config.cache_maxbytes,
             config.memmap_dir,
-        ).wait()
-        if (redis_client is not None and
-                int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
-            logger().info('training aborted')
-            return jsonify({'completed': False})
-    except KeyboardInterrupt:
-        logger().info('training aborted')
-        return jsonify({'completed': False})
-    except RuntimeError as e:
-        logger().exception('Failed in train_seg')
-        return jsonify(error=f'Runtime Error: {e}'), 500
+        )
+        while not async_result.ready():
+            if (redis_client is not None and
+                    int(redis_client.get(REDIS_KEY_STATE))
+                    == TrainState.IDLE.value):
+                logger().info('training aborted')
+                return jsonify({'completed': False})
     except Exception as e:
         logger().exception('Failed in train_seg')
         return jsonify(error=f'Exception: {e}'), 500
@@ -909,7 +901,7 @@ def predict_seg():
         config = SegmentationEvalConfig(req_json)
         logger().info(config)
         redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
-        spots = detect_spots_task.delay(
+        async_result = detect_spots_task.delay(
             str(config.device), config.model_path, config.keep_axials,
             config.is_3d, config.crop_size, config.scales,
             config.cache_maxbytes, config.use_2d, config.use_median,
@@ -917,19 +909,20 @@ def predict_seg():
             config.r_min, config.r_max, config.output_prediction,
             config.zpath_input, config.zpath_seg_output, config.timepoint,
             None, config.memmap_dir, config.batch_size,
-        ).wait()
-        if (redis_client is not None and
+        )
+        while not async_result.ready():
+            if (redis_client is not None and
                 int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
+                    == TrainState.IDLE.value):
+                logger().info('prediction aborted')
+                return jsonify({'spots': [], 'completed': False})
+        if async_result.failed():
+            raise async_result.result
+        spots = async_result.result
+        if spots is None:
             logger().info('prediction aborted')
             return jsonify({'spots': [], 'completed': False})
         publish_mq('prediction', 'Prediction updated')
-    except KeyboardInterrupt:
-        logger().info('prediction aborted')
-        return jsonify({'spots': [], 'completed': False})
-    except RuntimeError as e:
-        logger().exception('Failed in detect_spots')
-        return jsonify(error=f'Runtime Error: {e}'), 500
     except Exception as e:
         logger().exception('Failed in detect_spots')
         return jsonify(error=f'Exception: {e}'), 500

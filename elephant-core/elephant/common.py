@@ -824,10 +824,8 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
                              crop_box=crop_box,
                              use_2d=use_2d)
     except KeyboardInterrupt:
-        return []
-    except Exception:
-        logger().exception('Failed in detect_spots')
-        return []
+        logger().info('KeyboardInterrupt')
+        raise KeyboardInterrupt
     finally:
         torch.cuda.empty_cache()
 

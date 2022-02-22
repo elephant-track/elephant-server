@@ -68,7 +68,7 @@ def main():
             config.tiff_input = f
             spots.extend(detect_spots(
                 str(config.device), config.model_path, config.keep_axials,
-                config.is_3d, config.crop_size, config.scales,
+                config.is_pad, config.is_3d, config.crop_size, config.scales,
                 config.cache_maxbytes, config.use_2d, config.use_median,
                 config.patch_size, config.crop_box, config.c_ratio,
                 config.p_thresh, config.r_min, config.r_max,

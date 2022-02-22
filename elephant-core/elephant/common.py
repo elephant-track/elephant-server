@@ -65,10 +65,10 @@ from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
 from elephant.models import FlowResNet
 from elephant.models import UNet
+from elephant.redis_util import get_state
 from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
-from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
 from elephant.util import get_pad_size
@@ -330,13 +330,11 @@ def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
                         is_ncrops_updated = True
                         break
                     if redis_client is not None:
-                        while (int(redis_client.get(REDIS_KEY_STATE)) ==
-                               TrainState.WAIT.value):
+                        while (get_state() == TrainState.WAIT.value):
                             if is_logging:
                                 logger().info('waiting @train')
                             time.sleep(1)
-                        if (int(redis_client.get(REDIS_KEY_STATE)) ==
-                                TrainState.IDLE.value):
+                        if (get_state() == TrainState.IDLE.value):
                             return
                     x, y = x.to(device), y.to(device)
 
@@ -688,8 +686,7 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
         try:
             for batch, (x, kas, data_inds, patch_inds) in enumerate(loader):
                 if (redis_client is not None and
-                    int(redis_client.get(REDIS_KEY_STATE))
-                        == TrainState.IDLE.value):
+                        get_state() == TrainState.IDLE.value):
                     raise KeyboardInterrupt
                 if is_logging:
                     current_patch = min((batch + 1) * batch_size, sum_patches)
@@ -756,11 +753,11 @@ def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
     return prediction
 
 
-def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
-                 crop_size=(16, 384, 384), scales=None, cache_maxbytes=None,
-                 use_2d=False, use_median=False, patch_size=None, crop_box=None,
-                 c_ratio=0.4, p_thresh=0.5, r_min=0, r_max=1e6,
-                 output_prediction=False, zpath_input=None,
+def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
+                 is_3d=True, crop_size=(16, 384, 384), scales=None,
+                 cache_maxbytes=None, use_2d=False, use_median=False,
+                 patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
+                 r_min=0, r_max=1e6, output_prediction=False, zpath_input=None,
                  zpath_seg_output=None, timepoint=None, tiff_input=None,
                  memmap_dir=None, batch_size=1):
     use_median = use_median and is_3d
@@ -785,6 +782,7 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_3d=True,
                                  keep_axials,
                                  device,
                                  is_eval=True,
+                                 is_pad=is_pad,
                                  is_3d=is_3d,
                                  zpath_input=zpath_input,
                                  crop_size=crop_size,
@@ -1096,8 +1094,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
         ]
         for r in results:
             if (redis_client is not None and
-                    int(redis_client.get(REDIS_KEY_STATE)) ==
-                    TrainState.IDLE.value):
+                    get_state() == TrainState.IDLE.value):
                 raise KeyboardInterrupt
             if r is not None:
                 spots.append(r)
@@ -1114,7 +1111,7 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
     logger().info(f'{len(spots)} detections kept')
 
 
-def export_ctc_labels(config, spots_dict, redis_c=None):
+def export_ctc_labels(config, spots_dict):
     MIN_AREA_ELLIPSOID = 20
     timepoints = set([*range(config.t_start, config.t_end + 1, 1)])
     is_zip = config.savedir is None
@@ -1122,8 +1119,8 @@ def export_ctc_labels(config, spots_dict, redis_c=None):
     n_dims = len(config.shape)
     digits = max(3, len(str(max(list(spots_dict.keys())))))
     for t, spots in spots_dict.items():
-        if (redis_c is not None and
-                int(redis_c.get(REDIS_KEY_STATE)) == TrainState.IDLE.value):
+        if (redis_client is not None and
+                get_state() == TrainState.IDLE.value):
             logger().info('aborted')
             if is_zip:
                 shutil.rmtree(savedir)

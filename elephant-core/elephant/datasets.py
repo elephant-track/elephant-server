@@ -44,9 +44,9 @@ from elephant.logging import logger
 from elephant.util import LRUCacheDict
 from elephant.util import normalize_zero_one
 from elephant.util import RUN_ON_FLASK
+from elephant.redis_util import get_state
 from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_NCROPS
-from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
 
@@ -122,8 +122,7 @@ class SegmentationDatasetPrediction(du.Dataset):
 
     def __getitem__(self, index):
         if (redis_client is not None and
-                int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
+                get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
         data_ind = index // len(self.patch_list)
         patch_ind = index % len(self.patch_list)
@@ -294,8 +293,7 @@ class SegmentationDatasetZarr(du.Dataset):
                                     4: BG (HW), 5: Outer (HW), 6: Inner (HW)
         """
         if (redis_client is not None and
-                int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
+                get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
         if self.is_ae:
             i_frame = randrange(self.za_input.shape[0])
@@ -314,8 +312,7 @@ class SegmentationDatasetZarr(du.Dataset):
                         i_frame = int(v)
                         img_label = self._get_label_at(i_frame)
                         break
-                    if (int(redis_client.get(REDIS_KEY_STATE)) ==
-                            TrainState.IDLE.value):
+                    if (get_state() == TrainState.IDLE.value):
                         raise KeyboardInterrupt
                     if self.length != int(redis_client.get(REDIS_KEY_NCROPS)):
                         return ((torch.tensor(-200.), self.keep_axials),
@@ -651,8 +648,7 @@ class FlowDatasetZarr(du.Dataset):
         Label channels: (flow_x, flow_y, flow_z, mask)
         """
         if (redis_client is not None and
-                int(redis_client.get(REDIS_KEY_STATE))
-                == TrainState.IDLE.value):
+                get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
         if RUN_ON_FLASK and self.use_cache:
             za_label_a = zarr.open(self.zpath_flow_label, mode='a')

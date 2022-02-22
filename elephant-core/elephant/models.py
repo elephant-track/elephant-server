@@ -184,7 +184,7 @@ class UNet(nn.Module):
         if self.is_pad:
             # the order for pad size is (left, right, top, bottom, front, back)
             pad_size = sum([[x//2, ] * 2 for x in base_size[::-1]], [])
-            input = F.pad(input, pad_size, 'replicate')
+            x = F.pad(x, pad_size, 'reflect')
         # apply encoder path
         encoder_out = []
         for level in range(self.depth):
@@ -216,7 +216,7 @@ class UNet(nn.Module):
         # remove pad if specified
         if self.is_pad:
             slices = (slice(None), slice(None)) + tuple(
-                slice(self.pad_size[-(2+2*i)], -self.pad_size[-(1+2*i)])
+                slice(pad_size[-(2+2*i)], -pad_size[-(1+2*i)])
                 for i in range(self.n_dims)
             )
             x = x[slices]

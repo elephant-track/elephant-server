@@ -184,8 +184,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     img_shape = za_input.shape[1:]
     n_dims = len(img_shape)
     keybase = Path(za_label.store.path).parent.name
+    if scales is None:
+        scales = (1.,) * n_dims
+    scales = np.array(scales)
     for t, spots in spots_dict.items():
         label_indices = set()
+        centroids = []
         if 0 < auto_bg_thresh:
             label = np.where(
                 get_input_at(
@@ -208,6 +212,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             cnt[spot['tag']] += 1
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
+            centroids.append((centroid / scales).astype(int).tolist())
             covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
             covariance = covariance[-n_dims:, -n_dims:]
             radii, rotation = np.linalg.eigh(covariance)
@@ -251,24 +256,24 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer, 1)] = np.where(
-                    cond_outer_1,
-                    label_vis_value,
-                    label_vis[to_fancy_index(*indices_outer, 1)]
+                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                    cond_outer_1[..., None],
+                    (0, label_vis_value, 0),
+                    label_vis[to_fancy_index(*indices_outer)]
                 )
                 label[indices_inner_p] = 2 + label_offset
                 label_vis[
-                    to_fancy_index(*indices_inner_p, 1)] = label_vis_value
+                    to_fancy_index(*indices_inner_p)] = (0, label_vis_value, 0)
                 cond_inner = np.fmod(label[indices_inner] - 1, 3) <= 2
                 label[indices_inner] = np.where(
                     cond_inner,
                     3 + label_offset,
                     label[indices_inner]
                 )
-                label_vis[to_fancy_index(*indices_inner, 2)] = np.where(
-                    cond_inner,
-                    label_vis_value,
-                    label_vis[to_fancy_index(*indices_inner, 2)]
+                label_vis[to_fancy_index(*indices_inner)] = np.where(
+                    cond_inner[..., None],
+                    (0, 0, label_vis_value),
+                    label_vis[to_fancy_index(*indices_inner)]
                 )
             elif spot['tag'] in ('tb', 'fb'):
                 label[indices_outer] = np.where(
@@ -276,10 +281,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer, 1)] = np.where(
-                    cond_outer_1,
-                    label_vis_value,
-                    label_vis[to_fancy_index(*indices_outer, 1)]
+                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                    cond_outer_1[..., None],
+                    (0, label_vis_value, 0),
+                    label_vis[to_fancy_index(*indices_outer)]
                 )
             elif spot['tag'] in ('tn', 'fp'):
                 cond_outer_0 = np.fmod(label[indices_outer] - 1, 3) <= 0
@@ -288,10 +293,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     1 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer, 0)] = np.where(
-                    cond_outer_0,
-                    label_vis_value,
-                    label_vis[to_fancy_index(*indices_outer, 0)]
+                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                    cond_outer_0[..., None],
+                    (label_vis_value, 0, 0),
+                    label_vis[to_fancy_index(*indices_outer)]
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
@@ -307,7 +312,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             chunk.unlink()
         za_label[target_t] = label[target]
         za_label_vis[target_vis_t] = label_vis[target_vis]
-        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
+        za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
         if memmap_dir:
             fpath = Path(memmap_dir) / f'{keybase}-t{t}-seglabel.dat'

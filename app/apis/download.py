@@ -101,7 +101,7 @@ class CTC(Resource):
             spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
             redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
-            result = export_ctc_labels(config, spots_dict, redis_client)
+            result = export_ctc_labels(config, spots_dict)
             if isinstance(result, str):
                 resp = send_file(result)
                 # file_remover.cleanup_once_done(resp, result)

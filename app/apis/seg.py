@@ -72,7 +72,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    rotation_angle, contrast, zpath_input, zpath_seg_label,
                    log_interval, log_dir, step_offset=0, epoch_start=0,
                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None,
-                   memmap_dir=None):
+                   memmap_dir=None, input_size=None):
     if not torch.cuda.is_available():
         is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
@@ -84,7 +84,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                        scale_factor_base, rotation_angle, contrast, zpath_input,
                        zpath_seg_label, log_interval, log_dir, step_offset,
                        epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
-                       memmap_dir),
+                       memmap_dir, input_size),
                  nprocs=world_size,
                  join=True)
     else:
@@ -95,7 +95,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                       scale_factor_base, rotation_angle, contrast, zpath_input,
                       zpath_seg_label, log_interval, log_dir, step_offset,
                       epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
-                      memmap_dir)
+                      memmap_dir, input_size)
 
 
 @shared_task()
@@ -105,7 +105,8 @@ def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                       patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
                       r_min=0, r_max=1e6, output_prediction=False,
                       zpath_input=None, zpath_seg_output=None, timepoint=None,
-                      tiff_input=None, memmap_dir=None, batch_size=1):
+                      tiff_input=None, memmap_dir=None, batch_size=1,
+                      input_size=None):
     """
     Detect spots at the specified timepoint.
 
@@ -117,11 +118,12 @@ def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_pad=False,
     spots : list
         Detected spots as list. None is returned on error or cancel.
     """
-    return detect_spots(device, model_path, keep_axials, is_pad, is_3d, crop_size,
-                        scales, cache_maxbytes, use_2d, use_median, patch_size,
-                        crop_box, c_ratio, p_thresh, r_min, r_max,
+    return detect_spots(device, model_path, keep_axials, is_pad, is_3d,
+                        crop_size, scales, cache_maxbytes, use_2d, use_median,
+                        patch_size, crop_box, c_ratio, p_thresh, r_min, r_max,
                         output_prediction, zpath_input, zpath_seg_output,
-                        timepoint, tiff_input, memmap_dir, batch_size)
+                        timepoint, tiff_input, memmap_dir, batch_size,
+                        tuple(input_size))
 
 
 def _dilate_2d_indices(rr, cc, shape):
@@ -315,12 +317,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
         za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
         if memmap_dir:
-            fpath = Path(memmap_dir) / f'{keybase}-t{t}-seglabel.dat'
-            lock = FileLock(str(fpath) + '.lock')
-            with lock:
-                if fpath.exists():
-                    logger().info(f'remove {fpath}')
-                    fpath.unlink()
+            for fpath in Path(memmap_dir).glob(f'{keybase}-t{t}*-seglabel.dat'):
+                lock = FileLock(str(fpath) + '.lock')
+                with lock:
+                    if fpath.exists():
+                        logger().info(f'remove {fpath}')
+                        fpath.unlink()
         if is_livemode:
             if redis_client.get(REDIS_KEY_TIMEPOINT):
                 msg = 'Last update/training is ongoing'
@@ -362,7 +364,7 @@ class Predict(Resource):
                 config.p_thresh, config.r_min, config.r_max,
                 config.output_prediction, config.zpath_input,
                 config.zpath_seg_output, config.timepoint, None,
-                config.memmap_dir, config.batch_size,
+                config.memmap_dir, config.batch_size, config.input_size,
             )
             while not async_result.ready():
                 if (redis_client is not None and
@@ -551,7 +553,7 @@ class Train(Resource):
                 config.contrast, config.zpath_input, config.zpath_seg_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
                 config.is_cpu(), config.is_mixed_precision,
-                config.cache_maxbytes, config.memmap_dir,
+                config.cache_maxbytes, config.memmap_dir, config.input_size,
             )
             while not async_result.ready():
                 if (redis_client is not None and

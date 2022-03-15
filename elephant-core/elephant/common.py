@@ -26,10 +26,8 @@
 
 from collections import OrderedDict
 import gc
-import hashlib
 from functools import partial
 from functools import reduce
-import json
 import multiprocessing as mp
 import math
 from operator import mul
@@ -46,6 +44,7 @@ import skimage.io
 import skimage.measure
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.utils.data as du
 
@@ -55,9 +54,10 @@ if os.environ.get('CTC') != '1':
 
 from elephant.datasets import AutoencoderDatasetZarr
 from elephant.datasets import get_input_at
+from elephant.datasets import get_inputs_at
 from elephant.datasets import FlowDatasetZarr
 from elephant.datasets import SegmentationDatasetZarr
-from elephant.datasets import SegmentationDatasetPrediction
+from elephant.datasets import DatasetPrediction
 from elephant.logging import publish_mq
 from elephant.logging import logger
 from elephant.losses import AutoencoderLoss
@@ -71,9 +71,9 @@ from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
 from elephant.redis_util import REDIS_KEY_TIMEPOINT
 from elephant.redis_util import TrainState
-from elephant.util import get_pad_size
 from elephant.util import get_device
 from elephant.util import normalize_zero_one
+from elephant.util import to_fancy_index
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 from elephant.util.scaled_moments import scaled_moments_central
@@ -120,7 +120,7 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
                   zpath_seg_label, log_interval=100, log_dir=None,
                   step_offset=0, epoch_start=0, is_cpu=False,
                   is_mixed_precision=True, cache_maxbytes=None,
-                  memmap_dir=None):
+                  memmap_dir=None, input_size=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
@@ -138,12 +138,13 @@ def run_train_seg(rank_or_device, world_size, spot_indices, batch_size,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    if input_size is None:
+        input_size = zarr.open(zpath_input, mode='r').shape[-n_dims:]
     dataset = SegmentationDatasetZarr(
         zpath_input,
         zpath_seg_label,
         spot_indices,
-        input_shape,
+        input_size,
         crop_size,
         n_crops,
         keep_axials,
@@ -168,7 +169,7 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
                         is_3d, zpath_input, log_interval=100,
                         log_dir=None, step_offset=0, epoch_start=0,
                         is_cpu=False, is_mixed_precision=True,
-                        cache_maxbytes=None, memmap_dir=None):
+                        cache_maxbytes=None, memmap_dir=None, input_size=None):
     models = load_seg_models(model_path,
                              keep_axials,
                              get_device(),
@@ -183,10 +184,11 @@ def run_train_prior_seg(rank_or_device, world_size, crop_size, model_path,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    if input_size is None:
+        input_size = zarr.open(zpath_input, mode='r').shape[-n_dims:]
     dataset = AutoencoderDatasetZarr(
         zpath_input,
-        input_shape,
+        input_size,
         crop_size,
         n_crops,
         keep_axials=keep_axials,
@@ -209,7 +211,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                    zpath_input, zpath_flow_label, log_interval=100,
                    log_dir=None, step_offset=0, epoch_start=0, is_cpu=False,
                    is_mixed_precision=True, cache_maxbytes=None,
-                   memmap_dir=None):
+                   memmap_dir=None, input_size=None):
     models = load_flow_models(model_path,
                               get_device(),
                               is_3d=is_3d)
@@ -219,12 +221,13 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                   for model in models]
 
     n_dims = 2 + is_3d  # 3 or 2
-    input_shape = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+    if input_size is None:
+        input_size = zarr.open(zpath_input, mode='r').shape[-n_dims:]
     dataset = FlowDatasetZarr(
         zpath_input,
         zpath_flow_label,
         spot_indices,
-        input_shape,
+        input_size,
         crop_size,
         n_crops,
         keep_axials=keep_axials,
@@ -579,8 +582,15 @@ def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
     return loss
 
 
-def _patch_predict(model, device, input, keep_axials, patch_size, func,
-                   is_logging=True, batch_size=1, is_dp=True, memmap_dir=None):
+@profile
+def predict(model, device, input, keep_axials, patch_size=None,
+            is_logarithm=True, is_logging=True, batch_size=1, is_dp=True,
+            memmap_dir=None):
+    """
+    input: 5D tensor
+    """
+    if patch_size is None:
+        patch_size = input.shape[2:]
     n_dims = len(patch_size)
     input_shape = input.shape[-n_dims:]
     n_data = input.shape[0]
@@ -616,14 +626,16 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
             if input_shape[-3] < slice_z.stop:
                 slice_z = slice(input_shape[-3] - patch_size[-3],
                                 input_shape[-3])
-            patch_weight_z = np.ones(patch_size, dtype='float32')
+            patch_weight_z = torch.ones(patch_size,
+                                        dtype=torch.float32,
+                                        device=device)
             if 0 < iz:
-                patch_weight_z[:overlaps[-3]] *= np.linspace(
-                    0, 1, overlaps[-3]
+                patch_weight_z[:overlaps[-3]] *= torch.linspace(
+                    0, 1, overlaps[-3], device=device
                 ).reshape(-1, 1, 1)
             if iz < n_patches[-3] - 1:
-                patch_weight_z[-overlaps[-3]:] *= np.linspace(
-                    1, 0, overlaps[-3]
+                patch_weight_z[-overlaps[-3]:] *= torch.linspace(
+                    1, 0, overlaps[-3], device=device
                 ).reshape(-1, 1, 1)
         for iy in range(n_patches[-2]):
             slice_y = slice(intervals[-2] * iy,
@@ -632,16 +644,18 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                 slice_y = slice(input_shape[-2] - patch_size[-2],
                                 input_shape[-2])
             if n_dims == 3:
-                patch_weight_zy = patch_weight_z.copy()
+                patch_weight_zy = patch_weight_z.clone()
             else:
-                patch_weight_zy = np.ones(patch_size, dtype='float32')[None]
+                patch_weight_zy = torch.ones(patch_size,
+                                             dtype=torch.float32,
+                                             device=device)[None]
             if 0 < iy:
-                patch_weight_zy[:, :overlaps[-2]] *= np.linspace(
-                    0, 1, overlaps[-2]
+                patch_weight_zy[:, :overlaps[-2]] *= torch.linspace(
+                    0, 1, overlaps[-2], device=device
                 ).reshape(1, -1, 1)
             if iy < n_patches[-2] - 1:
-                patch_weight_zy[:, -overlaps[-2]:] *= np.linspace(
-                    1, 0, overlaps[-2]
+                patch_weight_zy[:, -overlaps[-2]:] *= torch.linspace(
+                    1, 0, overlaps[-2], device=device
                 ).reshape(1, -1, 1)
             for ix in range(n_patches[-1]):
                 i_patch += 1
@@ -650,14 +664,14 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                 if input_shape[-1] < slice_x.stop:
                     slice_x = slice(input_shape[-1] - patch_size[-1],
                                     input_shape[-1])
-                patch_weight_zyx = patch_weight_zy.copy()
+                patch_weight_zyx = patch_weight_zy.clone()
                 if 0 < ix:
-                    patch_weight_zyx[:, :, :overlaps[-1]] *= np.linspace(
-                        0, 1, overlaps[-1]
+                    patch_weight_zyx[:, :, :overlaps[-1]] *= torch.linspace(
+                        0, 1, overlaps[-1], device=device
                     ).reshape(1, 1, -1)
                 if ix < n_patches[-1] - 1:
-                    patch_weight_zyx[:, :, -overlaps[-1]:] *= np.linspace(
-                        1, 0, overlaps[-1]
+                    patch_weight_zyx[:, :, -overlaps[-1]:] *= torch.linspace(
+                        1, 0, overlaps[-1], device=device
                     ).reshape(1, 1, -1)
                 slices = [slice(None), slice_y, slice_x]
                 if n_dims == 3:
@@ -673,9 +687,9 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
     else:
         prediction = np.zeros((n_data, out_channels,) + input_shape,
                               dtype='float32')
-    dataset = SegmentationDatasetPrediction(input,
-                                            patch_list,
-                                            keep_axials)
+    dataset = DatasetPrediction(input,
+                                patch_list,
+                                keep_axials)
     loader = du.DataLoader(dataset, batch_size=batch_size,
                            shuffle=False, num_workers=0)
     if is_dp and str(device) != 'cpu' and 1 < torch.cuda.device_count():
@@ -693,50 +707,58 @@ def _patch_predict(model, device, input, keep_axials, patch_size, func,
                     logger().info(
                         f'processing {current_patch} / {sum_patches}')
                 x = x.to(device)
-                y = func(model(x, kas).detach().cpu().numpy())
+                y = model(x, kas).detach()
+                if is_logarithm:
+                    torch.exp_(y)
                 for index in range(len(y)):
                     slices, patch_weight = patch_list[patch_inds[index]]
                     prediction[(data_inds[index],) + tuple(slices)] += (
-                        y[index] * patch_weight
+                        (y[index] * patch_weight).cpu().numpy()
                     )
         except FileNotFoundError:
             raise KeyboardInterrupt
     return prediction
 
 
-def predict(model, device, input, keep_axials, patch_size=None,
-            is_logarithm=True, is_logging=True, batch_size=1, is_dp=True,
-            memmap_dir=None):
-    func = (lambda x: np.exp(x)) if is_logarithm else (lambda x: x)
-    if patch_size is None:
-        patch_size = input.shape[2:]
-    return _patch_predict(model, device, input, keep_axials, patch_size,
-                          func, is_logging, batch_size=batch_size,
-                          is_dp=is_dp, memmap_dir=memmap_dir)
-
-
-def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
-                        crop_box=None, is_logging=True, batch_size=1,
-                        memmap_dir=None):
+def _get_prediction(img, models, keep_axials, device, is_logarithm,
+                    patch_size=None, crop_box=None, is_logging=True,
+                    batch_size=1, memmap_dir=None):
+    """
+    input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
+    """
     if crop_box is not None:
         slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
                   slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
-        if img.ndim == 3:  # Z
+        if img.ndim == 5:  # Z
             slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
+        slices = (slice(None), slice(None)) + slices
         img = img[slices]
     with torch.no_grad():
-        x = torch.from_numpy(img[np.newaxis, np.newaxis])
+        x = torch.from_numpy(img)
         keep_axials = torch.tensor(keep_axials)[None]
         prediction = np.mean([predict(model,
                                       device,
                                       x,
                                       keep_axials,
                                       patch_size,
-                                      is_logarithm=True,
+                                      is_logarithm=is_logarithm,
                                       is_logging=is_logging,
                                       batch_size=batch_size,
                                       memmap_dir=memmap_dir)[0]
                               for model in models], axis=0)
+    return prediction
+
+
+def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
+                        crop_box=None, is_logging=True, batch_size=1,
+                        memmap_dir=None):
+    """
+    input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
+    """
+    prediction = _get_prediction(
+        img, models, keep_axials, device, True, patch_size, crop_box,
+        is_logging, batch_size, memmap_dir
+    )
     if img.ndim == 3:
         for z in range(prediction.shape[1]):
             post_fg = np.maximum(
@@ -751,248 +773,6 @@ def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
             prediction[2, z] = post_fg
             prediction[1, z] = 1. - (prediction[0, z] + prediction[2, z])
     return prediction
-
-
-def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
-                 is_3d=True, crop_size=(16, 384, 384), scales=None,
-                 cache_maxbytes=None, use_2d=False, use_median=False,
-                 patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
-                 r_min=0, r_max=1e6, output_prediction=False, zpath_input=None,
-                 zpath_seg_output=None, timepoint=None, tiff_input=None,
-                 memmap_dir=None, batch_size=1):
-    use_median = use_median and is_3d
-    if tiff_input is not None:
-        img_input = skimage.io.imread(tiff_input).astype('float32')
-        if use_median:
-            global_median = np.median(img_input)
-            for z in range(img_input.shape[0]):
-                slice_median = np.median(img_input[z])
-                if 0 < slice_median:
-                    img_input[z] -= slice_median - global_median
-        img_input = normalize_zero_one(img_input)
-    elif zpath_input is not None:
-        img_input = get_input_at(zarr.open(zpath_input, mode='r'),
-                                 timepoint,
-                                 memmap_dir=memmap_dir,
-                                 use_median=use_median)
-    else:
-        raise RuntimeError('No image is specified.')
-    try:
-        models = load_seg_models(model_path,
-                                 keep_axials,
-                                 device,
-                                 is_eval=True,
-                                 is_pad=is_pad,
-                                 is_3d=is_3d,
-                                 zpath_input=zpath_input,
-                                 crop_size=crop_size,
-                                 scales=scales,
-                                 cache_maxbytes=cache_maxbytes)
-        if len(img_input.shape) == 3 and use_2d:
-            prediction = np.swapaxes(np.array([
-                _get_seg_prediction(img_input[z],
-                                    models,
-                                    keep_axials,
-                                    device,
-                                    patch_size[-2:],
-                                    crop_box,
-                                    batch_size=batch_size,
-                                    memmap_dir=memmap_dir)
-                for z in range(img_input.shape[0])
-            ]), 0, 1)
-        else:
-            prediction = _get_seg_prediction(img_input,
-                                             models,
-                                             keep_axials,
-                                             device,
-                                             patch_size,
-                                             crop_box,
-                                             batch_size=batch_size,
-                                             memmap_dir=memmap_dir)
-        spots = []
-        _find_and_push_spots(spots,
-                             timepoint,
-                             # last channel is the center label
-                             prediction[-1],
-                             scales,
-                             c_ratio=c_ratio,
-                             p_thresh=p_thresh,
-                             r_min=r_min,
-                             r_max=r_max,
-                             crop_box=crop_box,
-                             use_2d=use_2d)
-    except KeyboardInterrupt:
-        logger().info('KeyboardInterrupt')
-        raise KeyboardInterrupt
-    finally:
-        torch.cuda.empty_cache()
-
-    if output_prediction and zpath_seg_output is not None:
-        za_seg = zarr.open(zpath_seg_output, mode='a')
-        slices_crop = tuple(
-            slice(crop_box[i],
-                  crop_box[i] + crop_box[i + 3])
-            if crop_box is not None else
-            slice(None)
-            for i in range(0 if is_3d else 1, 3)
-        )
-        if is_3d:  # 3D
-            dims_order = [1, 2, 3, 0]
-        else:  # 2D
-            # slices_crop = (0,) + slices_crop
-            dims_order = [1, 2, 0]
-        slices_crop = (timepoint,) + slices_crop
-        za_seg[slices_crop] = (np.transpose(prediction, dims_order)
-                               .astype('float16'))
-
-    return spots
-
-
-def _get_flow_prediction(img, model_path, keep_axials, device, patch_size,
-                         is_3d, is_logging=True, batch_size=1):
-    img = normalize_zero_one(img.astype('float32'))
-    models = load_flow_models(model_path,
-                              device,
-                              is_eval=True,
-                              is_3d=is_3d)
-
-    if patch_size is None:
-        pad_base = (2**keep_axials.count(False), 16, 16)
-        pad_shape = tuple(
-            get_pad_size(img.shape[i + 1], pad_base[i])
-            for i in range(len(img.shape) - 1)
-        )
-        slices = (slice(None),) + tuple(
-            slice(None) if max(pad_shape[i]) == 0 else
-            slice(pad_shape[i][0], -pad_shape[i][1])
-            for i in range(len(pad_shape))
-        )
-        img = np.pad(img, ((0, 0),) + pad_shape, mode='reflect')
-    with torch.no_grad():
-        x = torch.from_numpy(img[np.newaxis])
-        keep_axials = torch.tensor(keep_axials)[None]
-        prediction = np.mean(
-            [
-                predict(model, device, x, keep_axials, patch_size,
-                        is_logarithm=False, is_logging=is_logging,
-                        batch_size=batch_size)[0]
-                for model in models
-            ],
-            axis=0)
-    if patch_size is None:
-        prediction = prediction[slices]
-    # save and use as float16 to save the storage
-    return prediction.astype('float16')
-
-
-def _estimate_spots_with_flow(spots, flow_stack, scales):
-    img_shape = flow_stack[0].shape
-    n_dims = len(img_shape)
-    assert n_dims == 2 or n_dims == 3, (
-        f'n_dims: len(img_shape.shape) shoud be 2 or 3 but got {n_dims}'
-    )
-    assert n_dims == flow_stack.shape[0], (
-        f'n_dims: {n_dims} shoud be equal to '
-        f'flow_stack.shape[0]: {flow_stack.shape[0]}'
-    )
-    MIN_AREA_ELLIPSOID = 9
-    res_spots = []
-    draw_func = ellipsoid if n_dims == 3 else ellipse
-    for spot in spots:
-        spot_id = spot['id']
-        pos = spot['pos']  # XYZ
-        centroid = np.array(pos[::-1])  # ZYX
-        centroid = centroid[-n_dims:]
-        covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
-        covariance = covariance[-n_dims:, -n_dims:]
-        radii, rotation = np.linalg.eigh(covariance)
-        radii = np.sqrt(radii)
-        indices = draw_func(centroid,
-                            radii,
-                            rotation,
-                            scales,
-                            img_shape,
-                            MIN_AREA_ELLIPSOID)
-        if 0 < len(indices[0]):
-            displacement = [
-                flow_stack[dim][indices].mean() * scales[-1 - dim]
-                for dim in range(n_dims)
-            ]
-            res_spots.append(
-                {
-                    'id': spot_id,
-                    'pos': [
-                        pos[dim] + displacement[dim]
-                        for dim in range(n_dims)
-                    ] + ([0, ] if n_dims == 2 else []),
-                    'sqdisp': sum([
-                        displacement[dim]**2
-                        for dim in range(n_dims)
-                    ]),
-                }
-            )
-        else:
-            res_spots.append(
-                {
-                    'id': spot_id,
-                    'pos': pos,
-                    'sqdisp': 0,
-                }
-            )
-    return res_spots
-
-
-def spots_with_flow(config, spots):
-    prediction = None
-    if hasattr(config, 'tiff_input') and config.tiff_input is not None:
-        img_input = np.array([skimage.io.imread(f) for f in config.tiff_input])
-    elif config.zpath_input is not None:
-        za_input = zarr.open(config.zpath_input, mode='a')
-        za_flow = zarr.open(config.zpath_flow, mode='a')
-        za_hash = zarr.open(config.zpath_flow_hashes, mode='a')
-
-        # https://stackoverflow.com/questions/3431825/generating-an-md5-checksum-of-a-file#answer-3431838
-        if not Path(config.model_path).exists():
-            init_flow_models(config.model_path,
-                             config.device,
-                             config.is_3d)
-        hash_md5 = hashlib.md5()
-        with open(config.model_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
-                hash_md5.update(chunk)
-        za_md5 = zarr.array(
-            za_input[config.timepoint - 1:config.timepoint + 1]
-        ).digest('md5')
-        hash_md5.update(za_md5)
-        hash_md5.update(json.dumps(config.patch_size).encode('utf-8'))
-        model_md5 = hash_md5.digest()
-        if model_md5 == za_hash[config.timepoint - 1]:
-            prediction = za_flow[config.timepoint - 1]
-        if prediction is None:
-            img_input = np.array([
-                normalize_zero_one(za_input[i].astype('float32'))
-                for i in range(config.timepoint - 1, config.timepoint + 1)
-            ])
-    if prediction is None:
-        try:
-            prediction = _get_flow_prediction(img_input,
-                                              config.model_path,
-                                              config.keep_axials,
-                                              config.device,
-                                              config.patch_size,
-                                              config.is_3d)
-        finally:
-            torch.cuda.empty_cache()
-        if config.output_prediction:
-            za_flow[config.timepoint - 1] = prediction
-            za_hash[config.timepoint - 1] = model_md5
-        else:
-            za_hash[config.timepoint - 1] = 0
-    # Restore to voxel unit
-    for d in range(prediction.shape[0]):
-        prediction[d] *= config.flow_norm_factor[d]
-    res_spots = _estimate_spots_with_flow(spots, prediction, config.scales)
-    return res_spots
 
 
 def _region_to_spot(min_area, scales, origins, n_dims, use_2d, c_ratio, idx,
@@ -1109,6 +889,320 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
                 if r is not None:
                     spots.append(r)
     logger().info(f'{len(spots)} detections kept')
+
+
+def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
+                 is_3d=True, crop_size=(16, 384, 384), scales=None,
+                 cache_maxbytes=None, use_2d=False, use_median=False,
+                 patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
+                 r_min=0, r_max=1e6, output_prediction=False, zpath_input=None,
+                 zpath_seg_output=None, timepoint=None, tiff_input=None,
+                 memmap_dir=None, batch_size=1, input_size=None):
+    use_median = use_median and is_3d
+    n_dims = 2 + is_3d
+    resize_factor = [1, ] * n_dims
+    if tiff_input is not None:
+        img_input = skimage.io.imread(tiff_input).astype('float32')
+        if use_median:
+            global_median = np.median(img_input)
+            for z in range(img_input.shape[0]):
+                slice_median = np.median(img_input[z])
+                if 0 < slice_median:
+                    img_input[z] -= slice_median - global_median
+        img_input = normalize_zero_one(img_input)
+        if input_size is not None and img_input.shape[-n_dims:] != input_size:
+            original_size = img_input.shape
+            img_input = F.interpolate(torch.from_numpy(img_input)[None, None],
+                                      size=input_size,
+                                      mode=('trilinear' if is_3d else
+                                            'bilinear'),
+                                      align_corners=True,
+                                      )[0, 0].numpy()
+            resize_factor = [input_size[d] / original_size[d] for d in
+                             range(n_dims)]
+    elif zpath_input is not None:
+        za_input = zarr.open(zpath_input, mode='r')
+        img_input = get_input_at(za_input,
+                                 timepoint,
+                                 memmap_dir=memmap_dir,
+                                 use_median=use_median,
+                                 img_size=input_size)
+        if input_size is not None and za_input.shape[-n_dims:] != input_size:
+            original_size = za_input.shape[-n_dims:]
+            resize_factor = [input_size[d] / original_size[d] for d in
+                             range(n_dims)]
+    if any(factor != 1 for factor in resize_factor):
+        if crop_box is not None:
+            original_crop_box = [elem for elem in crop_box]
+        for d in range(n_dims):
+            scales[-(1+d)] = scales[-(1+d)] / resize_factor[-(1+d)]
+            if crop_box is not None:
+                crop_box[2-d] = int(crop_box[2-d] * resize_factor[-(1+d)])
+                crop_box[5-d] = int(crop_box[5-d] * resize_factor[-(1+d)])
+    else:
+        raise RuntimeError('No image is specified.')
+    try:
+        models = load_seg_models(model_path,
+                                 keep_axials,
+                                 device,
+                                 is_eval=True,
+                                 is_pad=is_pad,
+                                 is_3d=is_3d,
+                                 zpath_input=zpath_input,
+                                 crop_size=crop_size,
+                                 scales=scales,
+                                 cache_maxbytes=cache_maxbytes)
+        if len(img_input.shape) == 3 and use_2d:
+            prediction = np.swapaxes(np.array([
+                _get_seg_prediction(img_input[z][None, None],
+                                    models,
+                                    keep_axials,
+                                    device,
+                                    patch_size[-2:],
+                                    crop_box,
+                                    batch_size=batch_size,
+                                    memmap_dir=memmap_dir)
+                for z in range(img_input.shape[0])
+            ]), 0, 1)
+        else:
+            prediction = _get_seg_prediction(img_input[None, None],
+                                             models,
+                                             keep_axials,
+                                             device,
+                                             patch_size,
+                                             crop_box,
+                                             batch_size=batch_size,
+                                             memmap_dir=memmap_dir)
+        spots = []
+        _find_and_push_spots(spots,
+                             timepoint,
+                             # last channel is the center label
+                             prediction[-1],
+                             scales,
+                             c_ratio=c_ratio,
+                             p_thresh=p_thresh,
+                             r_min=r_min,
+                             r_max=r_max,
+                             crop_box=crop_box,
+                             use_2d=use_2d)
+    except KeyboardInterrupt:
+        logger().info('KeyboardInterrupt')
+        raise KeyboardInterrupt
+    finally:
+        torch.cuda.empty_cache()
+
+    if output_prediction and zpath_seg_output is not None:
+        za_seg = zarr.open(zpath_seg_output, mode='a')
+        if any(factor != 1 for factor in resize_factor):
+            if crop_box is not None:
+                size = original_crop_box[-n_dims:]
+            else:
+                size = original_size
+            prediction = F.interpolate(
+                torch.from_numpy(prediction)[None],
+                size=size,
+                mode=('trilinear' if is_3d else
+                      'bilinear'),
+                align_corners=True,
+            )[0].numpy()
+            if crop_box is not None:
+                crop_box = original_crop_box
+        slices_crop = tuple(
+            slice(crop_box[i],
+                  crop_box[i] + crop_box[i + 3])
+            if crop_box is not None else
+            slice(None)
+            for i in range(0 if is_3d else 1, 3)
+        )
+        if is_3d:  # 3D
+            dims_order = [1, 2, 3, 0]
+        else:  # 2D
+            # slices_crop = (0,) + slices_crop
+            dims_order = [1, 2, 0]
+        slices_crop = (timepoint,) + slices_crop
+        za_seg[slices_crop] = (np.transpose(prediction, dims_order)
+                               .astype('float16'))
+    return spots
+
+
+def _get_flow_prediction(img, models, keep_axials, device, patch_size=None,
+                         crop_box=None, is_logging=True, batch_size=1,
+                         memmap_dir=None):
+    """
+    input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
+    """
+    # save and use as float16 to save the storage
+    return _get_prediction(
+        img, models, keep_axials, device, False, patch_size, crop_box,
+        is_logging, batch_size, memmap_dir
+    ).astype('float16')
+
+
+def _estimate_spots_with_flow(spots, flow_stack, scales, crop_box=None):
+    img_shape = flow_stack[0].shape
+    n_dims = len(img_shape)
+    assert n_dims == 2 or n_dims == 3, (
+        f'n_dims: len(img_shape.shape) shoud be 2 or 3 but got {n_dims}'
+    )
+    assert n_dims == flow_stack.shape[0], (
+        f'n_dims: {n_dims} shoud be equal to '
+        f'flow_stack.shape[0]: {flow_stack.shape[0]}'
+    )
+    origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
+    origins = np.array(origins)
+    if scales is None:
+        scales = (1.,) * n_dims
+    scales = np.array(scales)
+    origins = origins * scales
+    MIN_AREA_ELLIPSOID = 9
+    res_spots = []
+    draw_func = ellipsoid if n_dims == 3 else ellipse
+    for spot in spots:
+        if (redis_client is not None and
+                get_state() == TrainState.IDLE.value):
+            raise KeyboardInterrupt
+        spot_id = spot['id']
+        pos = spot['pos']  # XYZ
+        centroid = np.array(pos[::-1])  # ZYX
+        centroid = centroid[-n_dims:]
+        centroid = centroid - origins
+        covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
+        covariance = covariance[-n_dims:, -n_dims:]
+        radii, rotation = np.linalg.eigh(covariance)
+        radii = np.sqrt(radii)
+        indices = draw_func(centroid,
+                            radii,
+                            rotation,
+                            scales,
+                            img_shape,
+                            MIN_AREA_ELLIPSOID)
+        if 0 < len(indices[0]):
+            displacement = [
+                flow_stack[to_fancy_index(dim, *indices)].mean()
+                * scales[-1 - dim]
+                for dim in range(n_dims)
+            ]
+            res_spots.append(
+                {
+                    'id': spot_id,
+                    'pos': [
+                        pos[dim] + displacement[dim]
+                        for dim in range(n_dims)
+                    ] + ([0, ] if n_dims == 2 else []),
+                    'sqdisp': sum([
+                        displacement[dim]**2
+                        for dim in range(n_dims)
+                    ]),
+                }
+            )
+        else:
+            res_spots.append(
+                {
+                    'id': spot_id,
+                    'pos': pos,
+                    'sqdisp': 0,
+                }
+            )
+    return res_spots
+
+
+def spots_with_flow(device, spots, model_path, keep_axials=(True,) * 4,
+                    is_pad=False, is_3d=True, scales=None, use_median=False,
+                    patch_size=None, crop_box=None, output_prediction=False,
+                    zpath_input=None, zpath_flow=None, timepoint=None,
+                    tiff_input=None, memmap_dir=None, batch_size=1,
+                    input_size=None, flow_norm_factor=None):
+    use_median = use_median and is_3d
+    n_dims = 2 + is_3d
+    resize_factor = [1, ] * n_dims
+    if tiff_input is not None:
+        img_input = np.array(
+            [normalize_zero_one(skimage.io.imread(f).astype('float32'))
+             for f in tiff_input]
+        )
+        if img_input.shape[-n_dims:] != input_size:
+            original_size = img_input.shape
+            img_input = F.interpolate(torch.from_numpy(img_input)[None],
+                                      size=input_size,
+                                      mode=('trilinear' if is_3d else
+                                            'bilinear'),
+                                      align_corners=True,
+                                      )[0].numpy()
+            resize_factor = [img_input.shape[d] / original_size[d] for d in
+                             range(n_dims)]
+    elif zpath_input is not None:
+        za_input = zarr.open(zpath_input, mode='r')
+        img_input = get_inputs_at(za_input,
+                                  timepoint,
+                                  memmap_dir=memmap_dir,
+                                  img_size=input_size)
+        if input_size is not None and za_input.shape[-n_dims:] != input_size:
+            original_size = za_input.shape[-n_dims:]
+            resize_factor = [input_size[d] / original_size[d] for d in
+                             range(n_dims)]
+    if any(factor != 1 for factor in resize_factor):
+        if crop_box is not None:
+            original_crop_box = [elem for elem in crop_box]
+        for d in range(n_dims):
+            scales[-(1+d)] = scales[-(1+d)] / resize_factor[-(1+d)]
+            if crop_box is not None:
+                crop_box[2-d] = int(crop_box[2-d] * resize_factor[-(1+d)])
+                crop_box[5-d] = int(crop_box[5-d] * resize_factor[-(1+d)])
+    try:
+        models = load_flow_models(model_path,
+                                  device,
+                                  is_eval=True,
+                                  is_pad=is_pad,
+                                  is_3d=is_3d)
+        prediction = _get_flow_prediction(img_input[None],
+                                          models,
+                                          keep_axials,
+                                          device,
+                                          patch_size,
+                                          crop_box,
+                                          batch_size=batch_size,
+                                          memmap_dir=memmap_dir)
+
+        if flow_norm_factor is not None:
+            # Restore to voxel unit
+            for d in range(prediction.shape[0]):
+                prediction[d] *= flow_norm_factor[d]
+        res_spots = _estimate_spots_with_flow(spots,
+                                              prediction,
+                                              scales,
+                                              crop_box)
+    finally:
+        torch.cuda.empty_cache()
+    if output_prediction and zpath_flow is not None:
+        za_flow = zarr.open(zpath_flow, mode='a')
+        if any(factor != 1 for factor in resize_factor):
+            if crop_box is not None:
+                size = original_crop_box[-n_dims:]
+            else:
+                size = original_size
+            prediction = F.interpolate(
+                torch.from_numpy(prediction)[None].type(torch.float32),
+                size=size,
+                mode=('trilinear' if is_3d else
+                      'bilinear'),
+                align_corners=True,
+            )[0].numpy()
+            if crop_box is not None:
+                crop_box = original_crop_box
+        slices_crop = tuple(
+            slice(crop_box[i],
+                  crop_box[i] + crop_box[i + 3])
+            if crop_box is not None else
+            slice(None)
+            for i in range(0 if is_3d else 1, 3)
+        )
+        slices_crop = (timepoint - 1, slice(None)) + slices_crop
+        if flow_norm_factor is not None:
+            # Normalize
+            for d in range(prediction.shape[0]):
+                prediction[d] /= flow_norm_factor[d]
+        za_flow[slices_crop] = prediction.astype('float16')
+    return res_spots
 
 
 def export_ctc_labels(config, spots_dict):

@@ -67,7 +67,7 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                     rotation_angle, zpath_input, zpath_flow_label,
                     log_interval, log_dir, step_offset=0, epoch_start=0,
                     is_cpu=False, is_mixed_precision=True, cache_maxbytes=None,
-                    memmap_dir=None):
+                    memmap_dir=None, input_size=None):
     if not torch.cuda.is_available():
         is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
@@ -78,7 +78,7 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                        n_crops, is_3d, scale_factor_base, rotation_angle,
                        zpath_input, zpath_flow_label, log_interval, log_dir,
                        step_offset, epoch_start, is_cpu, is_mixed_precision,
-                       cache_maxbytes, memmap_dir),
+                       cache_maxbytes, memmap_dir, input_size),
                  nprocs=world_size,
                  join=True)
     else:
@@ -88,7 +88,22 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                        n_crops, is_3d, scale_factor_base, rotation_angle,
                        zpath_input, zpath_flow_label, log_interval, log_dir,
                        step_offset, epoch_start, is_cpu, is_mixed_precision,
-                       cache_maxbytes, memmap_dir)
+                       cache_maxbytes, memmap_dir, input_size)
+
+
+@shared_task()
+def spots_with_flow_task(device, spots, model_path, keep_axials=(True,) * 4,
+                         is_pad=False, is_3d=True, scales=None,
+                         use_median=False, patch_size=None, crop_box=None,
+                         output_prediction=False, zpath_input=None,
+                         zpath_flow=None, timepoint=None, tiff_input=None,
+                         memmap_dir=None, batch_size=1, input_size=None,
+                         flow_norm_factor=None):
+    return spots_with_flow(device, spots, model_path, keep_axials, is_pad,
+                           is_3d, scales, use_median, patch_size,
+                           crop_box, output_prediction, zpath_input,
+                           zpath_flow, timepoint, tiff_input, memmap_dir,
+                           batch_size, tuple(input_size), flow_norm_factor)
 
 
 def _update_flow_labels(spots_dict,
@@ -101,12 +116,14 @@ def _update_flow_labels(spots_dict,
     for t, spots in spots_dict.items():
         label = np.zeros(za_label.shape[1:], dtype='float32')
         label_indices = set()
+        centroids = []
         for spot in spots:
             if get_state() == TrainState.IDLE.value:
                 logger().info('update aborted')
                 return make_response(jsonify({'completed': False}))
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
+            centroids.append((centroid / scales).astype(int).tolist())
             covariance = np.array(spot['covariance'][::-1]).reshape(3, 3)
             covariance = covariance[-n_dims:, -n_dims:]
             radii, rotation = np.linalg.eigh(covariance)
@@ -128,11 +145,17 @@ def _update_flow_labels(spots_dict,
             # last channels is for weight
             label[to_fancy_index(-1, *indices)] = weight
             label_indices.update(
-                tuple(map(tuple, np.stack(indices, axis=1).tolist())))
+                tuple(map(tuple, np.stack(indices, axis=1).tolist()))
+            )
         logger().info(f'frame:{t+1}, {len(spots)} linkings')
-        za_label.attrs[f'label.indices.{t}'] = list(label_indices)
+        target = tuple(np.array(list(label_indices)).T)
+        target = tuple(
+            np.column_stack([to_fancy_index(c, *target) for c in range(4)])
+        )
+        target_t = to_fancy_index(t, *target)
+        za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
-        za_label[t] = label
+        za_label[target_t] = label[target]
     return make_response(jsonify({'completed': True}))
 
 
@@ -193,7 +216,7 @@ class Train(Resource):
                 config.zpath_input, config.zpath_flow_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
                 config.is_cpu(), config.is_mixed_precision,
-                config.cache_maxbytes, config.memmap_dir,
+                config.cache_maxbytes, config.memmap_dir, config.input_size
             )
             while not async_result.ready():
                 if (redis_client is not None and
@@ -299,18 +322,28 @@ class Predict(Resource):
             logger().info(config)
             redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
             spots = req_json.get('spots')
-            res_spots = spots_with_flow(config, spots)
-            if (redis_client is not None and
+            async_result = spots_with_flow_task.delay(
+                str(config.device), spots, config.model_path,
+                config.keep_axials, config.is_pad, config.is_3d, config.scales,
+                config.use_median, config.patch_size, config.crop_box,
+                config.output_prediction, config.zpath_input,
+                config.zpath_flow, config.timepoint, None, config.memmap_dir,
+                config.batch_size, config.input_size, config.flow_norm_factor,
+            )
+            while not async_result.ready():
+                if (redis_client is not None and
                     get_state()
-                    == TrainState.IDLE.value):
+                        == TrainState.IDLE.value):
+                    logger().info('prediction aborted')
+                    return make_response(
+                        jsonify({'spots': [], 'completed': False})
+                    )
+            if async_result.failed():
+                raise async_result.result
+            res_spots = async_result.result
+            if res_spots is None:
                 logger().info('prediction aborted')
                 return make_response(jsonify({'spots': [], 'completed': False}))
-        except KeyboardInterrupt:
-            logger().info('prediction aborted')
-            return make_response(jsonify({'spots': [], 'completed': False}))
-        except RuntimeError as e:
-            logger().exception('Failed in predict_flow')
-            return make_response(jsonify(error=f'Runtime Error: {e}'), 500)
         except Exception as e:
             logger().exception('Failed in predict_flow')
             return make_response(jsonify(error=f'Exception: {e}'), 500)

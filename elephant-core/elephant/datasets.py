@@ -57,7 +57,7 @@ if not PROFILE:
         return func
 
 
-def _load_image(za_input, timepoint, use_median=False):
+def _load_image(za_input, timepoint, use_median=False, img_size=None):
     img = za_input[timepoint].astype('float32')
     if use_median and img.ndim == 3:
         global_median = np.median(img)
@@ -65,12 +65,23 @@ def _load_image(za_input, timepoint, use_median=False):
             slice_median = np.median(img[z])
             if 0 < slice_median:
                 img[z] -= slice_median - global_median
-    return normalize_zero_one(img)
+    img = normalize_zero_one(img)
+    if img_size is not None:
+        img = F.interpolate(
+            torch.from_numpy(img)[None, None],
+            size=img_size,
+            mode='trilinear' if img.ndim == 3 else 'bilinear',
+            align_corners=True,
+        )[0, 0].numpy()
+    return img
 
 
-def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
+def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
+                        img_size=None):
     if memmap_dir:
         key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
+        if img_size is not None:
+            key += '-' + '-'.join(map(str, img_size))
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
@@ -81,34 +92,58 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False):
                     fpath,
                     dtype='float32',
                     mode='w+',
-                    shape=za.shape[1:]
-                )[:] = _load_image(za, timepoint, use_median)
+                    shape=za.shape[1:] if img_size is None else img_size
+                )[:] = _load_image(za, timepoint, use_median, img_size)
             logger().info(f'loading from {fpath}')
             return np.memmap(
                 fpath,
                 dtype='float32',
                 mode='c',
-                shape=za.shape[1:]
+                shape=za.shape[1:] if img_size is None else img_size
             )
-    return _load_image(za, timepoint, use_median)
+    return _load_image(za, timepoint, use_median, img_size)
 
 
 def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
-                 use_median=False):
+                 use_median=False, img_size=None):
     if cache_dict:
         key = f'{za_input.store.path}-t{timepoint}-{use_median}'
+        if img_size is not None:
+            key += '-' + '-'.join(map(str, img_size))
         cache = cache_dict.get(key)
         if cache is None:
             cache = cache_dict.get(
                 key,
                 _get_memmap_or_load(za_input, timepoint, memmap_dir,
-                                    use_median)
+                                    use_median, img_size)
             )
         return cache
-    return _get_memmap_or_load(za_input, timepoint, memmap_dir, use_median)
+    return _get_memmap_or_load(za_input, timepoint, memmap_dir, use_median,
+                               img_size)
 
 
-class SegmentationDatasetPrediction(du.Dataset):
+def get_inputs_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
+                  img_size=None):
+    if cache_dict:
+        key = f'{za_input.store.path}:{timepoint}-{timepoint+1}'
+        cache = cache_dict.get(key)
+        if cache is None:
+            cache = np.array([get_input_at(za_input,
+                                           i,
+                                           cache_dict,
+                                           memmap_dir,
+                                           img_size=img_size)
+                              for i in (timepoint, timepoint+1)])
+            return cache
+    return np.array([get_input_at(za_input,
+                                  i,
+                                  cache_dict,
+                                  memmap_dir,
+                                  img_size=img_size)
+                     for i in (timepoint, timepoint+1)])
+
+
+class DatasetPrediction(du.Dataset):
     def __init__(self, input, patch_list, keep_axials):
         """
         input: 5D tensor
@@ -187,7 +222,7 @@ class SegmentationDatasetZarr(du.Dataset):
         self.za_input = zarr.open(zpath_input, mode='r')
         crop_size = tuple(
             min(crop_size[i], img_size[i]) for i in range(self.n_dims))
-        self.img_size = img_size
+        self.img_size = tuple(img_size)
         self.crop_size = crop_size
         self.scale_factors = scale_factors
         self.rand_crop_ranges = [(
@@ -243,10 +278,12 @@ class SegmentationDatasetZarr(du.Dataset):
             return self.n_crops
         return len(self.indices) * self.n_crops
 
-    def _get_memmap_or_load_label(self, timepoint):
+    def _get_memmap_or_load_label(self, timepoint, img_size=None):
         if self.memmap_dir:
-            key = (f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
-                   + '-seglabel')
+            key = f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
+            if img_size is not None:
+                key += '-' + '-'.join(map(str, img_size))
+            key += '-seglabel'
             fpath = Path(self.memmap_dir) / f'{key}.dat'
             lock = FileLock(str(fpath) + '.lock')
             with lock:
@@ -257,29 +294,49 @@ class SegmentationDatasetZarr(du.Dataset):
                         fpath,
                         dtype='uint8',
                         mode='w+',
-                        shape=self.za_label.shape[1:]
-                    )[:] = self.za_label[timepoint]
+                        shape=(self.za_label.shape[1:] if img_size is None
+                               else img_size)
+                    )[:] = (
+                        self.za_label[timepoint] if img_size is None else
+                        F.interpolate(
+                            torch.from_numpy(
+                                self.za_label[timepoint]
+                            )[None, None],
+                            size=img_size,
+                            mode='nearest',
+                        )[0, 0].numpy()
+                    )
                 logger().info(f'loading from {fpath}')
                 return np.memmap(
                     fpath,
                     dtype='uint8',
                     mode='c',
-                    shape=self.za_label.shape[1:]
+                    shape=(self.za_label.shape[1:] if img_size is None
+                           else img_size)
                 )
-        return self.za_label[timepoint]
+        return (
+            self.za_label[timepoint] if img_size is None else
+            F.interpolate(
+                torch.from_numpy(self.za_label[timepoint])[None, None],
+                size=img_size,
+                mode='nearest',
+            )[0, 0].numpy()
+        )
 
-    def _get_label_at(self, ind):
+    def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            key = f'{self.za_label.store.path}:{ind}'
+            key = f'{self.za_label.store.path}-t{ind}'
+            if img_size is not None:
+                key += '-' + '-'.join(map(str, img_size))
             cache = self.cache_dict_label.get(key)
             if cache is None:
-                label = self._get_memmap_or_load_label(ind)
+                label = self._get_memmap_or_load_label(ind, img_size)
                 assert 0 < label.max(), (
                     'positive weight should exist in the label'
                 )
                 cache = self.cache_dict_label.get(key, label)
             return cache
-        label = self._get_memmap_or_load_label(ind)
+        label = self._get_memmap_or_load_label(ind, img_size)
         assert 0 < label.max(), (
             'positive weight should exist in the label'
         )
@@ -310,7 +367,7 @@ class SegmentationDatasetZarr(du.Dataset):
                     v = redis_client.get(REDIS_KEY_TIMEPOINT)
                     if v is not None:
                         i_frame = int(v)
-                        img_label = self._get_label_at(i_frame)
+                        img_label = self._get_label_at(i_frame, self.img_size)
                         break
                     if (get_state() == TrainState.IDLE.value):
                         raise KeyboardInterrupt
@@ -322,9 +379,14 @@ class SegmentationDatasetZarr(du.Dataset):
                     i_frame = np.random.choice(self.indices)
                 else:
                     i_frame = self.indices[index // self.n_crops]
-                img_label = self._get_label_at(i_frame)
+                img_label = self._get_label_at(i_frame, self.img_size)
         img_input = get_input_at(self.za_input, i_frame, self.cache_dict_input,
-                                 self.memmap_dir)
+                                 self.memmap_dir, img_size=self.img_size)
+        if self.za_input.shape[1:] != self.img_size:
+            resize_factor = [self.img_size[d] / self.za_input.shape[1+d]
+                             for d in range(img_input.ndim)]
+        else:
+            resize_factor = [1, ] * img_input.ndim
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input[None])
             tensor_label = torch.from_numpy(img_label).long()
@@ -377,9 +439,10 @@ class SegmentationDatasetZarr(du.Dataset):
                 origins = [
                     randint(
                         max(0,
-                            base_index[i] - (item_crop_size[i] - 1)),
-                        min(img_input.shape[i] - item_crop_size[i],
-                            base_index[i])
+                            (int(base_index[i] * resize_factor[i]) -
+                             (item_crop_size[i] - 1))),
+                        min((img_input.shape[i] - item_crop_size[i]),
+                            int(base_index[i] * resize_factor[i]))
                     )
                     for i in range(self.n_dims)
                 ]
@@ -569,7 +632,7 @@ class FlowDatasetZarr(du.Dataset):
         self.length = length
         crop_size = tuple(
             min(crop_size[i], img_size[i]) for i in range(len(crop_size)))
-        self.img_size = img_size
+        self.img_size = tuple(img_size)
         self.crop_size = crop_size
         self.n_crops = n_crops
         self.n_dims = len(crop_size)
@@ -607,35 +670,66 @@ class FlowDatasetZarr(du.Dataset):
             return self.length
         return len(self.indices) * self.n_crops
 
-    def _get_inputs_at(self, ind):
-        if self.use_cache:
-            key = f'{self.za_input.store.path}:{ind}-{ind+1}'
-            cache = self.cache_dict_input.get(key)
-            if cache is None:
-                cache = np.array([get_input_at(self.za_input,
-                                               i,
-                                               self.cache_dict_input,
-                                               self.memmap_dir)
-                                  for i in (ind, ind+1)])
-            return cache
-        return np.array([get_input_at(self.za_input,
-                                      i,
-                                      self.cache_dict_input,
-                                      self.memmap_dir)
-                         for i in (ind, ind+1)])
+    def _get_memmap_or_load_label(self, timepoint, img_size=None):
+        if self.memmap_dir:
+            key = f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
+            if img_size is not None:
+                key += '-' + '-'.join(map(str, img_size))
+            key += '-flowlabel'
+            fpath = Path(self.memmap_dir) / f'{key}.dat'
+            lock = FileLock(str(fpath) + '.lock')
+            shape = (self.n_dims + 1, ) + (
+                self.za_label.shape[-self.n_dims:] if img_size is None
+                else img_size)
+            with lock:
+                if not fpath.exists():
+                    logger().info(f'creating {fpath}')
+                    fpath.parent.mkdir(parents=True, exist_ok=True)
+                    np.memmap(
+                        fpath,
+                        dtype='float32',
+                        mode='w+',
+                        shape=shape,
+                    )[:] = (
+                        self.za_label[timepoint] if img_size is None else
+                        F.interpolate(
+                            torch.from_numpy(
+                                self.za_label[timepoint]
+                            )[None],
+                            size=img_size,
+                            mode='nearest',
+                        )[0].numpy()
+                    )
+                logger().info(f'loading from {fpath}')
+                return np.memmap(
+                    fpath,
+                    dtype='float32',
+                    mode='c',
+                    shape=shape,
+                )
+        return (
+            self.za_label[timepoint] if img_size is None else
+            F.interpolate(
+                torch.from_numpy(self.za_label[timepoint])[None],
+                size=img_size,
+                mode='nearest',
+            )[0].numpy()
+        )
 
-    def _get_label_at(self, ind):
+    def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
             key = f'{self.za_label.store.path}:{ind}'
+            if img_size is not None:
+                key += '-' + '-'.join(map(str, img_size))
             cache = self.cache_dict_label.get(key)
             if cache is None:
-                label = self.za_label[ind]
+                label = self._get_memmap_or_load_label(ind, img_size)
                 assert 0 < label[-1].max(), (
                     'positive weight should exist in the label'
                 )
                 cache = self.cache_dict_label.get(key, label)
             return cache
-        label = self.za_label[ind]
+        label = self._get_memmap_or_load_label(ind, img_size)
         assert 0 < label[-1].max(), (
             'positive weight should exist in the label'
         )
@@ -659,8 +753,16 @@ class FlowDatasetZarr(du.Dataset):
             i_frame = np.random.choice(self.indices)
         else:
             i_frame = self.indices[index // self.n_crops]
-        img_input = self._get_inputs_at(i_frame)
-        img_label = self._get_label_at(i_frame)
+        img_input = get_inputs_at(self.za_input, i_frame,
+                                  cache_dict=self.cache_dict_input,
+                                  memmap_dir=self.memmap_dir,
+                                  img_size=self.img_size)
+        if self.za_input.shape[1:] != self.img_size:
+            resize_factor = [self.img_size[d] / self.za_input.shape[1+d]
+                             for d in range(self.n_dims)]
+        else:
+            resize_factor = [1, ] * self.n_dims
+        img_label = self._get_label_at(i_frame, img_size=self.img_size)
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input)
             tensor_label = torch.from_numpy(img_label)
@@ -706,9 +808,10 @@ class FlowDatasetZarr(du.Dataset):
             origins = [
                 randint(
                     max(0,
-                        base_index[i] - (item_crop_size[i] - 1)),
-                    min(img_input.shape[i + 1] - item_crop_size[i],
-                        base_index[i])
+                        (int(base_index[i] * resize_factor[i]) -
+                         (item_crop_size[i] - 1))),
+                    min((img_input.shape[1+i] - item_crop_size[i]),
+                        int(base_index[i] * resize_factor[i]))
                 )
                 for i in range(self.n_dims)
             ]
@@ -793,7 +896,8 @@ class FlowDatasetZarr(du.Dataset):
                                    sin_theta * sliced_label_y)
                 sliced_label[1] = (sin_theta * sliced_label_x +
                                    cos_theta * sliced_label_y) * -1
-            break
+            if 0 < sliced_label[-1].max():
+                break
 
         tensor_input = torch.from_numpy(sliced_input)
         tensor_label = torch.from_numpy(sliced_label)
@@ -806,12 +910,14 @@ class FlowDatasetZarr(du.Dataset):
             tensor_label = F.interpolate(tensor_label[None].float(),
                                          self.crop_size,
                                          mode='nearest')[0]
-        flip_dims = [-(1 + i)
-                     for i, v in enumerate(torch.rand(self.n_dims)) if v < 0.5]
-        tensor_input = torch.flip(tensor_input, flip_dims)
-        tensor_label = torch.flip(tensor_label, flip_dims)
-        for flip_dim in flip_dims:
-            tensor_label[-1 - flip_dim] *= -1
+        is_flip = True
+        if is_flip:
+            flip_dims = [-(1 + i) for i, v in
+                         enumerate(torch.rand(self.n_dims)) if v < 0.5]
+            tensor_input = torch.flip(tensor_input, flip_dims)
+            tensor_label = torch.flip(tensor_label, flip_dims)
+            for flip_dim in flip_dims:
+                tensor_label[-1 - flip_dim] *= -1
         # Channel order: (flow_x, flow_y, flow_z, mask, input_t0, input_t1)
         tensor_target = torch.cat((tensor_label, tensor_input), )
         return (tensor_input, self.keep_axials), tensor_target

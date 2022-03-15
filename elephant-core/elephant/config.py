@@ -83,6 +83,10 @@ class BaseConfig():
             self.scales = config.get('scales')[::-1]
         else:
             self.scales = None
+        if config.get('input_size') is not None:
+            self.input_size = tuple(config.get('input_size')[::-1])
+        else:
+            self.input_size = None
         # U-Net has 4 downsamplings
         n_keep_axials = min(4, config.get('n_keep_axials', 4))
         self.keep_axials = tuple(True if i < n_keep_axials else False
@@ -199,12 +203,18 @@ class SegmentationTrainConfig(SegmentationEvalConfig):
 class FlowEvalConfig(BaseConfig):
     def __init__(self, config):
         super().__init__(config)
+        self.use_median = config.get('use_median', False)
+        self.is_pad = config.get('is_pad', False)
         max_displacement = config.get('max_displacement',
                                       DEFAULT_MAX_DISPLACEMENT)
         self.flow_norm_factor = (
             float(max_displacement),  # X
             float(max_displacement),  # Y
             float(max_displacement / (2**config.get('n_keep_axials', 0))))  # Z
+        crop_box = config.get('crop_box')
+        if crop_box is not None:
+            crop_box = crop_box[:3][::-1] + crop_box[3:][::-1]
+        self.crop_box = crop_box
         if self.dataset_name is not None:
             self.zpath_flow = os.path.join(DATASETS_DIR,
                                            self.dataset_name,

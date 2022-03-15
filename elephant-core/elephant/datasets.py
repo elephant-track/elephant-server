@@ -52,7 +52,7 @@ from elephant.redis_util import TrainState
 
 PROFILE = "ELEPHANT_PROFILE" in os.environ
 
-if not PROFILE:
+if os.environ.get('ELEPHANT_PROFILE') is None:
     def profile(func):
         return func
 
@@ -125,16 +125,21 @@ def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
 def get_inputs_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
                   img_size=None):
     if cache_dict:
-        key = f'{za_input.store.path}:{timepoint}-{timepoint+1}'
+        key = f'{za_input.store.path}-t{timepoint}-t{timepoint+1}'
+        if img_size is not None:
+            key += '-' + '-'.join(map(str, img_size))
         cache = cache_dict.get(key)
         if cache is None:
-            cache = np.array([get_input_at(za_input,
-                                           i,
-                                           cache_dict,
-                                           memmap_dir,
-                                           img_size=img_size)
-                              for i in (timepoint, timepoint+1)])
-            return cache
+            cache = cache_dict.get(
+                key,
+                np.array([get_input_at(za_input,
+                                       i,
+                                       cache_dict,
+                                       memmap_dir,
+                                       img_size=img_size)
+                          for i in (timepoint, timepoint+1)])
+            )
+        return cache
     return np.array([get_input_at(za_input,
                                   i,
                                   cache_dict,
@@ -328,6 +333,7 @@ class SegmentationDatasetZarr(du.Dataset):
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
+            key += '-seglabel'
             cache = self.cache_dict_label.get(key)
             if cache is None:
                 label = self._get_memmap_or_load_label(ind, img_size)
@@ -718,9 +724,10 @@ class FlowDatasetZarr(du.Dataset):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            key = f'{self.za_label.store.path}:{ind}'
+            key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
+            key += '-flowlabel'
             cache = self.cache_dict_label.get(key)
             if cache is None:
                 label = self._get_memmap_or_load_label(ind, img_size)
@@ -735,6 +742,7 @@ class FlowDatasetZarr(du.Dataset):
         )
         return label
 
+    @profile
     def __getitem__(self, index):
         """
         Input shape: (2, (D,) H, W)

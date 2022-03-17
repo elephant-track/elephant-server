@@ -74,6 +74,7 @@ def main():
                 config.p_thresh, config.r_min, config.r_max,
                 config.output_prediction, None, None, config.timepoint,
                 config.tiff_input, config.memmap_dir, config.batch_size,
+                config.input_size,
             ))
         with open(args.spots, 'w') as f:
             json.dump({'spots': spots}, f)

@@ -1,0 +1,27 @@
+{
+    "device": "cuda",
+    "patch": [
+        512,
+        512
+    ],
+    "crop_size": [
+        384,
+        384
+    ],
+    "lr": 5e-5,
+    "n_crops": 5,
+    "t_max": 0,
+    "n_epochs": 1,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0,
+    "is_3d": false,
+    "batch_size": 2,
+    "nmodels": 1,
+    "model_name": "profile_seg.pth",
+    "log_dir": "profile_seg",
+    "epoch_start": 0,
+    "cache_maxbytes": 0,
+    "use_memmap": true
+}

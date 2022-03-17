@@ -84,7 +84,7 @@ def main():
         n_dims = 2 + config.is_3d  # 3 or 2
         models = load_models(config, args.command)
         za_input = zarr.open(config.zpath_input, mode='r')
-        input_shape = za_input.shape[-n_dims:]
+        input_size = config_dict.get('input_size', za_input.shape[-n_dims:])
         train_index = []
         eval_index = []
         eval_interval = config_dict.get('evalinterval')
@@ -111,7 +111,7 @@ def main():
                 config.zpath_input,
                 config.zpath_seg_label,
                 train_index,
-                input_shape,
+                input_size,
                 config.crop_size,
                 config.n_crops,
                 keep_axials=config.keep_axials,
@@ -127,8 +127,8 @@ def main():
                 config.zpath_input,
                 config.zpath_seg_label,
                 eval_index,
-                input_shape,
-                input_shape,
+                input_size,
+                input_size,
                 1,
                 keep_axials=config.keep_axials,
                 is_eval=True,
@@ -155,7 +155,7 @@ def main():
                 config.zpath_input,
                 config.zpath_flow_label,
                 train_index,
-                input_shape,
+                input_size,
                 config.crop_size,
                 config.n_crops,
                 keep_axials=config.keep_axials,
@@ -170,8 +170,8 @@ def main():
                 config.zpath_input,
                 config.zpath_flow_label,
                 eval_index,
-                input_shape,
-                input_shape,
+                input_size,
+                input_size,
                 1,
                 keep_axials=config.keep_axials,
                 is_eval=True,
@@ -209,7 +209,7 @@ def main():
                       loss_fn, config.n_epochs, config.model_path, False,
                       config.log_interval, config.log_dir, step_offset,
                       config.epoch_start, eval_loader, config.patch_size,
-                      config.is_cpu(), True)
+                      config.is_cpu(), args.command == 'seg')
         else:
             world_size = (2 if config.is_cpu() else
                           torch.cuda.device_count())
@@ -218,7 +218,7 @@ def main():
                            loss_fn, config.n_epochs, config.model_path, False,
                            config.log_interval, config.log_dir, step_offset,
                            config.epoch_start, eval_loader, config.patch_size,
-                           config.is_cpu(), True),
+                           config.is_cpu(), args.command == 'seg'),
                      nprocs=world_size,
                      join=True)
 

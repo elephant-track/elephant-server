@@ -5,8 +5,8 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     ./docker /docker
     ./script /opt/elephant/script
     ./app /app
-    ./elephant-core /tmp/elephant-core
-    ./environment.yml /tmp/environment.yml
+    ./elephant-core /src/elephant-core
+    ./environment.yml /src/environment.yml
 
 %environment
     export UWSGI_UID=$(id -u)
@@ -29,12 +29,12 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     rm -rf /var/lib/apt/lists/*
 
     # Install Python modules
-    sed -i 's/.\/elephant-core/\/tmp\/elephant-core/g' /tmp/environment.yml \
+    sed -i 's/.\/elephant-core/\/src\/elephant-core/g' /src/environment.yml \
     && conda install -c conda-forge -y mamba \
-    && mamba env update -f /tmp/environment.yml \
+    && mamba env update -f /src/environment.yml \
     && mamba clean -qafy \
-    && rm -rf /tmp/elephant-core \
-    && rm /tmp/environment.yml
+    && rm -rf /src/elephant-core \
+    && rm /src/environment.yml
 
     # Install and set up RabbbitMQ
     chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh
@@ -48,6 +48,7 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
 
     # Set up nginx
     cp /docker/nginx.conf /etc/nginx/nginx.conf
+    groupadd nginx && useradd -g nginx nginx
     sed -i 's/listen 80/listen 8080/g' /etc/nginx/nginx.conf
 
     # forward request and error logs to docker log collector
@@ -57,7 +58,6 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
     mkdir -p /etc/uwsgi
     cp /docker/uwsgi.ini /etc/uwsgi/uwsgi.ini
-    sed -i '9d' /etc/uwsgi/uwsgi.ini
 
     # Custom Supervisord config
     cp /docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

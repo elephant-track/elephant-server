@@ -48,7 +48,7 @@ def to_fancy_index(*data):
     (array([0, 0]), array([1, 1]), array([2, 2]), array([3, 3]))
 
     """
-    return tuple(np.column_stack(tuple(np.broadcast(*data))))
+    return tuple(np.array(tuple(np.broadcast(*data))).T)
 
 
 def get_next_multiple(value, base):

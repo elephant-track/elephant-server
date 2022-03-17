@@ -210,7 +210,7 @@ def run_train_flow(rank_or_device, world_size, spot_indices, batch_size,
                    n_crops, is_3d, scale_factor_base, rotation_angle,
                    zpath_input, zpath_flow_label, log_interval=100,
                    log_dir=None, step_offset=0, epoch_start=0, is_cpu=False,
-                   is_mixed_precision=True, cache_maxbytes=None,
+                   is_mixed_precision=False, cache_maxbytes=None,
                    memmap_dir=None, input_size=None):
     models = load_flow_models(model_path,
                               get_device(),
@@ -1133,7 +1133,7 @@ def spots_with_flow(device, spots, model_path, keep_axials=(True,) * 4,
     elif zpath_input is not None:
         za_input = zarr.open(zpath_input, mode='r')
         img_input = get_inputs_at(za_input,
-                                  timepoint,
+                                  timepoint - 1,
                                   memmap_dir=memmap_dir,
                                   img_size=input_size)
         if input_size is not None and za_input.shape[-n_dims:] != input_size:

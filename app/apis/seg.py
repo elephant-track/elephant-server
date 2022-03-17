@@ -307,6 +307,15 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
         target_vis = tuple(
             np.column_stack([to_fancy_index(*target, c) for c in range(3)])
         )
+        target_vis = (
+            tuple(np.tile(target[i], 3) for i in range(n_dims)) +
+            (np.array(
+                sum(
+                    tuple([(c,) * len(target[0]) for c in range(3)]),
+                    ()
+                )
+            ), )
+        )
         target_vis_t = to_fancy_index(t, *target_vis)
         for chunk in Path(za_label.store.path).glob(f'{t}.*'):
             chunk.unlink()

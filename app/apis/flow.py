@@ -54,7 +54,6 @@ from elephant.redis_util import TrainState
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_KEY_UPDATE_ONGOING_FLOW
 from elephant.util import get_device
-from elephant.util import to_fancy_index
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
 
@@ -66,7 +65,7 @@ def train_flow_task(spot_indices, batch_size, crop_size, model_path, n_epochs,
                     keep_axials, scales, lr, n_crops, is_3d, scale_factor_base,
                     rotation_angle, zpath_input, zpath_flow_label,
                     log_interval, log_dir, step_offset=0, epoch_start=0,
-                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None,
+                    is_cpu=False, is_mixed_precision=False, cache_maxbytes=None,
                     memmap_dir=None, input_size=None):
     if not torch.cuda.is_available():
         is_cpu = True
@@ -140,19 +139,26 @@ def _update_flow_labels(spots_dict,
             weight = 1  # if spot['tag'] in ['tp'] else false_weight
             displacement = spot['displacement']  # X, Y, Z
             for i in range(n_dims):
-                label[to_fancy_index(i, *indices)] = (
+                ind = (np.full(len(indices[0]), i),) + indices
+                label[ind] = (
                     displacement[i] / scales[-1 - i] / flow_norm_factor[i])
             # last channels is for weight
-            label[to_fancy_index(-1, *indices)] = weight
+            ind = (np.full(len(indices[0]), -1),) + indices
+            label[ind] = weight
             label_indices.update(
                 tuple(map(tuple, np.stack(indices, axis=1).tolist()))
             )
         logger().info(f'frame:{t+1}, {len(spots)} linkings')
         target = tuple(np.array(list(label_indices)).T)
-        target = tuple(
-            np.column_stack([to_fancy_index(c, *target) for c in range(4)])
-        )
-        target_t = to_fancy_index(t, *target)
+        target = (
+            np.array(
+                sum(
+                    tuple([(i,) * len(target[0]) for i in range(n_dims + 1)]),
+                    ()
+                )
+            ),
+        ) + tuple(np.tile(target[i], n_dims + 1) for i in range(n_dims))
+        target_t = (np.full(len(target[0]), t),) + target
         za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
         za_label[target_t] = label[target]
@@ -215,7 +221,7 @@ class Train(Resource):
                 config.scale_factor_base, config.rotation_angle,
                 config.zpath_input, config.zpath_flow_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
-                config.is_cpu(), config.is_mixed_precision,
+                config.is_cpu(), False,
                 config.cache_maxbytes, config.memmap_dir, config.input_size
             )
             while not async_result.ready():

@@ -304,9 +304,6 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
         target = tuple(np.array(list(label_indices)).T)
         target_t = to_fancy_index(t, *target)
-        target_vis = tuple(
-            np.column_stack([to_fancy_index(*target, c) for c in range(3)])
-        )
         target_vis = (
             tuple(np.tile(target[i], 3) for i in range(n_dims)) +
             (np.array(

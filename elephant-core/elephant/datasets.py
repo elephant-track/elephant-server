@@ -85,23 +85,41 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
-            if not fpath.exists():
+            if fpath.exists():
+                logger().info(f'loading from {fpath}')
+                return np.memmap(
+                    fpath,
+                    dtype='float32',
+                    mode='c',
+                    shape=za.shape[1:] if img_size is None else img_size
+                )
+            else:
                 logger().info(f'creating {fpath}')
                 fpath.parent.mkdir(parents=True, exist_ok=True)
-                np.memmap(
+                img = np.memmap(
                     fpath,
                     dtype='float32',
                     mode='w+',
                     shape=za.shape[1:] if img_size is None else img_size
-                )[:] = _load_image(za, timepoint, use_median, img_size)
-            logger().info(f'loading from {fpath}')
-            return np.memmap(
-                fpath,
-                dtype='float32',
-                mode='c',
-                shape=za.shape[1:] if img_size is None else img_size
-            )
-    return _load_image(za, timepoint, use_median, img_size)
+                )
+                img[:] = za[timepoint].astype('float32')
+    else:
+        img = za[timepoint].astype('float32')
+    if use_median and img.ndim == 3:
+        global_median = np.median(img)
+        for z in range(img.shape[0]):
+            slice_median = np.median(img[z])
+            if 0 < slice_median:
+                img[z] -= slice_median - global_median
+    img = normalize_zero_one(img)
+    if img_size is not None:
+        img = F.interpolate(
+            torch.from_numpy(img)[None, None],
+            size=img_size,
+            mode='trilinear' if img.ndim == 3 else 'bilinear',
+            align_corners=True,
+        )[0, 0].numpy()
+    return img
 
 
 def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,

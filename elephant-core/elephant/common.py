@@ -931,6 +931,8 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
             original_size = za_input.shape[-n_dims:]
             resize_factor = [input_size[d] / original_size[d] for d in
                              range(n_dims)]
+    else:
+        raise RuntimeError('No image is specified.')
     if any(factor != 1 for factor in resize_factor):
         if crop_box is not None:
             original_crop_box = [elem for elem in crop_box]
@@ -939,8 +941,6 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
             if crop_box is not None:
                 crop_box[2-d] = int(crop_box[2-d] * resize_factor[-(1+d)])
                 crop_box[5-d] = int(crop_box[5-d] * resize_factor[-(1+d)])
-    else:
-        raise RuntimeError('No image is specified.')
     try:
         models = load_seg_models(model_path,
                                  keep_axials,

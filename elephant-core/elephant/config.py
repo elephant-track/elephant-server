@@ -98,6 +98,8 @@ class BaseConfig():
             if self.scales is not None:
                 self.scales = self.scales[-2:]
             self.crop_size = self.crop_size[-2:]
+            if self.input_size is not None:
+                self.input_size = self.input_size[-2:]
         if self.dataset_name is not None:
             self.zpath_input = os.path.join(DATASETS_DIR,
                                             self.dataset_name,

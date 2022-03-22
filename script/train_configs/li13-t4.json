@@ -1,0 +1,11 @@
+[
+    {
+        "dataset_name": "training/li13_T4",
+        "scales": [
+            0.31,
+            0.31,
+            2.48
+        ],
+        "n_keep_axials": 3
+    }
+]

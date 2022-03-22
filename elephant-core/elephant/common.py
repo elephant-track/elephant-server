@@ -736,16 +736,27 @@ def _get_prediction(img, models, keep_axials, device, is_logarithm,
     with torch.no_grad():
         x = torch.from_numpy(img)
         keep_axials = torch.tensor(keep_axials)[None]
-        prediction = np.mean([predict(model,
-                                      device,
-                                      x,
-                                      keep_axials,
-                                      patch_size,
-                                      is_logarithm=is_logarithm,
-                                      is_logging=is_logging,
-                                      batch_size=batch_size,
-                                      memmap_dir=memmap_dir)[0]
-                              for model in models], axis=0)
+        if len(models) == 1:
+            prediction = predict(models[0],
+                                 device,
+                                 x,
+                                 keep_axials,
+                                 patch_size,
+                                 is_logarithm=is_logarithm,
+                                 is_logging=is_logging,
+                                 batch_size=batch_size,
+                                 memmap_dir=memmap_dir)[0]
+        else:
+            prediction = np.mean([predict(model,
+                                          device,
+                                          x,
+                                          keep_axials,
+                                          patch_size,
+                                          is_logarithm=is_logarithm,
+                                          is_logging=is_logging,
+                                          batch_size=batch_size,
+                                          memmap_dir=memmap_dir)[0]
+                                  for model in models], axis=0)
     return prediction
 
 

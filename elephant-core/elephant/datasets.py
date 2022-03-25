@@ -102,7 +102,17 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
                     mode='w+',
                     shape=za.shape[1:] if img_size is None else img_size
                 )
-                img[:] = za[timepoint].astype('float32')
+                if img_size is None:
+                    img[:] = za[timepoint].astype('float32')
+                else:
+                    img[:] = F.interpolate(
+                        torch.from_numpy(
+                            za[timepoint].astype('float32')
+                        )[None, None],
+                        size=img_size,
+                        mode='trilinear' if img.ndim == 3 else 'bilinear',
+                        align_corners=True,
+                    )[0, 0].numpy()
     else:
         img = za[timepoint].astype('float32')
     if use_median and img.ndim == 3:
@@ -112,13 +122,6 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
             if 0 < slice_median:
                 img[z] -= slice_median - global_median
     img = normalize_zero_one(img)
-    if img_size is not None:
-        img = F.interpolate(
-            torch.from_numpy(img)[None, None],
-            size=img_size,
-            mode='trilinear' if img.ndim == 3 else 'bilinear',
-            align_corners=True,
-        )[0, 0].numpy()
     return img
 
 

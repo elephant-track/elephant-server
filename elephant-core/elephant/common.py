@@ -38,6 +38,7 @@ import tempfile
 import time
 
 import numpy as np
+from scipy import ndimage
 from skimage.filters import gaussian
 from skimage.filters import prewitt
 import skimage.io
@@ -680,7 +681,7 @@ def predict(model, device, input, keep_axials, patch_size=None,
                     patch_weight_zyx = patch_weight_zyx[0]
                 patch_list.append((slices, patch_weight_zyx))
     if memmap_dir:
-        prediction = np.memmap(str(Path(memmap_dir) / 'prediction.dat'),
+        prediction = np.memmap(str(Path(memmap_dir) / '_prediction.dat'),
                                dtype='float32',
                                mode='w+',
                                shape=(n_data, out_channels,) + input_shape)
@@ -842,6 +843,42 @@ def _region_to_spot(min_area, scales, origins, n_dims, use_2d, c_ratio, idx,
     return spot
 
 
+def _label_bool_inplace(image, background=None, return_num=False,
+                        connectivity=None, output=None):
+    """
+    A modified version of skimage.measure.label, where output can be specified
+    as a parameter.
+
+    Original code:
+    https://github.com/scikit-image/scikit-image/blob/e562d9f8914c804151b5247bd2e778d53510904f/skimage/measure/_label.py#L6
+    """
+    from skimage.morphology._util import _resolve_neighborhood
+    if background == 1:
+        image = ~image
+
+    if connectivity is None:
+        connectivity = image.ndim
+
+    if not 1 <= connectivity <= image.ndim:
+        raise ValueError(
+            f'Connectivity for {image.ndim}D image should '
+            f'be in [1, ..., {image.ndim}]. Got {connectivity}.'
+        )
+
+    footprint = _resolve_neighborhood(None, connectivity, image.ndim)
+    result = ndimage.label(image, structure=footprint, output=output)
+    if isinstance(result, tuple):
+        output, max_label = result
+    else:
+        # output was written in-place
+        max_label = result
+
+    if return_num:
+        return output, max_label
+    else:
+        return output
+
+
 def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
                          p_thresh=0.5, r_min=0, r_max=1e6, crop_box=None,
                          use_2d=False):
@@ -851,9 +888,25 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
     )
     origins = crop_box[3-n_dims:3] if crop_box is not None else (0,) * n_dims
     origins = np.array(origins)
-    labels = skimage.measure.label(p_thresh < c_probs)
+
+    if isinstance(c_probs, np.memmap):
+        c_bin = np.memmap(c_probs.filename.replace('.dat', '_binary.dat'),
+                          dtype='bool',
+                          mode='w+',
+                          shape=c_probs.shape)
+        c_bin[:] = p_thresh < c_probs
+        labels = np.memmap(c_probs.filename.replace('.dat', '_labels.dat'),
+                           dtype=np.int32,
+                           mode='w+',
+                           shape=c_probs.shape)
+        labels, max_label = _label_bool_inplace(c_bin,
+                                                return_num=True,
+                                                output=labels)
+    else:
+        labels, max_label = skimage.measure.label(p_thresh < c_probs,
+                                                  return_num=True)
     regions = skimage.measure.regionprops(labels)
-    logger().info(f'{len(regions)} detections found')
+    logger().info(f'{max_label} detections found')
 
     if scales is None:
         scales = (1.,) * n_dims
@@ -984,6 +1037,41 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                                              crop_box,
                                              batch_size=batch_size,
                                              memmap_dir=memmap_dir)
+
+        # output prediction
+        if output_prediction and zpath_seg_output is not None:
+            za_seg = zarr.open(zpath_seg_output, mode='a')
+            if any(factor != 1 for factor in resize_factor):
+                if crop_box is not None:
+                    size = original_crop_box[-n_dims:]
+                else:
+                    size = original_size
+                prediction = F.interpolate(
+                    torch.from_numpy(prediction)[None],
+                    size=size,
+                    mode=('trilinear' if is_3d else
+                          'bilinear'),
+                    align_corners=True,
+                )[0].numpy()
+                if crop_box is not None:
+                    crop_box = original_crop_box
+            slices_crop = tuple(
+                slice(crop_box[i],
+                      crop_box[i] + crop_box[i + 3])
+                if crop_box is not None else
+                slice(None)
+                for i in range(0 if is_3d else 1, 3)
+            )
+            if is_3d:  # 3D
+                dims_order = [1, 2, 3, 0]
+            else:  # 2D
+                # slices_crop = (0,) + slices_crop
+                dims_order = [1, 2, 0]
+            slices_crop = (timepoint,) + slices_crop
+            za_seg[slices_crop] = (np.transpose(prediction, dims_order)
+                                   .astype('float16'))
+
+        # calculate spots
         spots = []
         _find_and_push_spots(spots,
                              timepoint,
@@ -1001,38 +1089,10 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
         raise KeyboardInterrupt
     finally:
         torch.cuda.empty_cache()
+        if memmap_dir is not None:
+            for p in Path(memmap_dir).glob('_prediction*'):
+                p.unlink()
 
-    if output_prediction and zpath_seg_output is not None:
-        za_seg = zarr.open(zpath_seg_output, mode='a')
-        if any(factor != 1 for factor in resize_factor):
-            if crop_box is not None:
-                size = original_crop_box[-n_dims:]
-            else:
-                size = original_size
-            prediction = F.interpolate(
-                torch.from_numpy(prediction)[None],
-                size=size,
-                mode=('trilinear' if is_3d else
-                      'bilinear'),
-                align_corners=True,
-            )[0].numpy()
-            if crop_box is not None:
-                crop_box = original_crop_box
-        slices_crop = tuple(
-            slice(crop_box[i],
-                  crop_box[i] + crop_box[i + 3])
-            if crop_box is not None else
-            slice(None)
-            for i in range(0 if is_3d else 1, 3)
-        )
-        if is_3d:  # 3D
-            dims_order = [1, 2, 3, 0]
-        else:  # 2D
-            # slices_crop = (0,) + slices_crop
-            dims_order = [1, 2, 0]
-        slices_crop = (timepoint,) + slices_crop
-        za_seg[slices_crop] = (np.transpose(prediction, dims_order)
-                               .astype('float16'))
     return spots
 
 

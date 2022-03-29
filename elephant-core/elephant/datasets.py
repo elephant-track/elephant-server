@@ -85,15 +85,7 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
-            if fpath.exists():
-                logger().info(f'loading from {fpath}')
-                return np.memmap(
-                    fpath,
-                    dtype='float32',
-                    mode='c',
-                    shape=za.shape[1:] if img_size is None else img_size
-                )
-            else:
+            if not fpath.exists():
                 logger().info(f'creating {fpath}')
                 fpath.parent.mkdir(parents=True, exist_ok=True)
                 img = np.memmap(
@@ -113,15 +105,29 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
                         mode='trilinear' if img.ndim == 3 else 'bilinear',
                         align_corners=True,
                     )[0, 0].numpy()
+                if use_median and img.ndim == 3:
+                    global_median = np.median(img)
+                    for z in range(img.shape[0]):
+                        slice_median = np.median(img[z])
+                        if 0 < slice_median:
+                            img[z] -= slice_median - global_median
+                img = normalize_zero_one(img)
+            logger().info(f'loading from {fpath}')
+            return np.memmap(
+                fpath,
+                dtype='float32',
+                mode='c',
+                shape=za.shape[1:] if img_size is None else img_size
+            )
     else:
         img = za[timepoint].astype('float32')
-    if use_median and img.ndim == 3:
-        global_median = np.median(img)
-        for z in range(img.shape[0]):
-            slice_median = np.median(img[z])
-            if 0 < slice_median:
-                img[z] -= slice_median - global_median
-    img = normalize_zero_one(img)
+        if use_median and img.ndim == 3:
+            global_median = np.median(img)
+            for z in range(img.shape[0]):
+                slice_median = np.median(img[z])
+                if 0 < slice_median:
+                    img[z] -= slice_median - global_median
+        img = normalize_zero_one(img)
     return img
 
 

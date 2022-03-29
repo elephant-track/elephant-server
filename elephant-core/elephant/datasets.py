@@ -80,6 +80,7 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
                         img_size=None):
     if memmap_dir:
         key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
+        fpath_org = Path(memmap_dir) / f'{key}.dat'
         if img_size is not None:
             key += '-' + '-'.join(map(str, img_size))
         fpath = Path(memmap_dir) / f'{key}.dat'
@@ -88,19 +89,24 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
             if not fpath.exists():
                 logger().info(f'creating {fpath}')
                 fpath.parent.mkdir(parents=True, exist_ok=True)
-                img = np.memmap(
-                    fpath,
+                img_org = np.memmap(
+                    fpath_org,
                     dtype='float32',
                     mode='w+',
-                    shape=za.shape[1:] if img_size is None else img_size
+                    shape=za.shape[1:]
                 )
+                img_org[:] = za[timepoint].astype('float32')
                 if img_size is None:
-                    img[:] = za[timepoint].astype('float32')
+                    img = img_org
                 else:
+                    img = np.memmap(
+                        fpath,
+                        dtype='float32',
+                        mode='w+',
+                        shape=img_size
+                    )
                     img[:] = F.interpolate(
-                        torch.from_numpy(
-                            za[timepoint].astype('float32')
-                        )[None, None],
+                        torch.from_numpy(img_org)[None, None],
                         size=img_size,
                         mode='trilinear' if img.ndim == 3 else 'bilinear',
                         align_corners=True,

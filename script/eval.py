@@ -25,7 +25,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
 """Commandline interface for prediction and export using a config file."""
-import os
 
 from elephant.common import detect_spots
 from elephant.config import SegmentationEvalConfig

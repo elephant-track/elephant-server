@@ -1038,6 +1038,20 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                                              batch_size=batch_size,
                                              memmap_dir=memmap_dir)
 
+        # calculate spots
+        spots = []
+        _find_and_push_spots(spots,
+                             timepoint,
+                             # last channel is the center label
+                             prediction[-1],
+                             scales,
+                             c_ratio=c_ratio,
+                             p_thresh=p_thresh,
+                             r_min=r_min,
+                             r_max=r_max,
+                             crop_box=crop_box,
+                             use_2d=use_2d)
+
         # output prediction
         if output_prediction and zpath_seg_output is not None:
             za_seg = zarr.open(zpath_seg_output, mode='a')
@@ -1070,20 +1084,6 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
             slices_crop = (timepoint,) + slices_crop
             za_seg[slices_crop] = (np.transpose(prediction, dims_order)
                                    .astype('float16'))
-
-        # calculate spots
-        spots = []
-        _find_and_push_spots(spots,
-                             timepoint,
-                             # last channel is the center label
-                             prediction[-1],
-                             scales,
-                             c_ratio=c_ratio,
-                             p_thresh=p_thresh,
-                             r_min=r_min,
-                             r_max=r_max,
-                             crop_box=crop_box,
-                             use_2d=use_2d)
     except KeyboardInterrupt:
         logger().info('KeyboardInterrupt')
         raise KeyboardInterrupt

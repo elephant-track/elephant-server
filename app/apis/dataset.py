@@ -24,6 +24,7 @@
 # ==============================================================================
 from pathlib import Path
 
+from celery import shared_task
 from flask import jsonify
 from flask import make_response
 from flask import request
@@ -35,6 +36,17 @@ from elephant.logging import logger
 from elephant.tool import dataset as dstool
 
 api = Namespace('dataset', description='Dataset APIs')
+
+
+@shared_task()
+def generate_dataset_task(input, output, is_uint16=False, divisor=1.,
+                          is_2d=False):
+    dstool.generate_dataset(input,
+                            output,
+                            is_uint16,
+                            divisor,
+                            is_2d,
+                            True)
 
 
 @api.route('/check')
@@ -96,14 +108,13 @@ class Generate(Resource):
             logger().info(
                 f'multiple .h5 files found, use the first one {h5_files[0]}')
         try:
-            dstool.generate_dataset(
-                h5_files[0],
-                p_dataset,
+            generate_dataset_task.delay(
+                str(h5_files[0]),
+                str(p_dataset),
                 req_json.get('is_uint16', None),
                 req_json.get('divisor', 1.),
                 req_json.get('is_2d', False),
-                True,
-            )
+            ).wait()
         except Exception as e:
             logger().exception('Failed in gen_datset')
             return make_response(jsonify(error=f'Exception: {e}'), 500)

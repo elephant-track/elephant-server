@@ -56,6 +56,7 @@ app.config.update(
     broker_url='redis://localhost:6379',
     result_backend='redis://localhost:6379',
     worker_redirect_stdouts=False,
+    worker_prefetch_multiplier=1,
 )
 
 celery = make_celery(app)

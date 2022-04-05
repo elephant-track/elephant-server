@@ -18,6 +18,7 @@ export HOME=/home/user
 export UWSGI_UID=user
 export UWSGI_GID=user
 export MKL_THREADING_LAYER=GNU
+export GRPC_POLL_STRATEGY=epoll1
 
 if [[ -z "${AS_LOCAL_USER}" ]]; then
   "$@"

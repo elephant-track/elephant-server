@@ -51,7 +51,7 @@ def write_chunk(chunk, zpath, t, n_dims, is_2d, input, timepoint, divisor,
 
 
 def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
-                     is_message_queue=False):
+                     is_message_queue=False, is_multiprocessing=True):
     """Generate a dataset for ELEPHANT.
 
     Parameters
@@ -73,6 +73,8 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         default: False (3d+time)
     is_message_queue : bool
         With this flag, progress is reported using pika.BlockingConnection.
+    is_multiprocessing : bool
+        With this flag, multiprocessing is enabled.
 
     This function will generate the following files.
 
@@ -159,38 +161,47 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         dtype='u1'
     )
     dtype = np.uint16 if is_uint16 else np.uint8
-    with mp.Pool() as pool:
+    if n_dims == 2:
+        chunks = tuple(
+            (slice(None),
+                slice(y, y+chunk_shape[-2]),
+                slice(x, x+chunk_shape[-1]))
+            for y in range(0, shape[-2], chunk_shape[-2])
+            for x in range(0, shape[-1], chunk_shape[-1])
+        )
+    else:
+        chunks = tuple(
+            (slice(z, z+chunk_shape[-3]),
+                slice(y, y+chunk_shape[-2]),
+                slice(x, x+chunk_shape[-1]))
+            for z in range(0, shape[-3], chunk_shape[-3])
+            for y in range(0, shape[-2], chunk_shape[-2])
+            for x in range(0, shape[-1], chunk_shape[-1])
+        )
+    if is_multiprocessing:
+        pool = mp.Pool()
+    try:
         for t, timepoint in tqdm(enumerate(timepoints)):
-            if n_dims == 2:
-                chunks = tuple(
-                    (slice(None),
-                     slice(y, y+chunk_shape[-2]),
-                     slice(x, x+chunk_shape[-1]))
-                    for y in range(0, shape[-2], chunk_shape[-2])
-                    for x in range(0, shape[-1], chunk_shape[-1])
-                )
+            partial_write_chunk = partial(write_chunk,
+                                          zpath=str(p / 'imgs.zarr'),
+                                          t=t,
+                                          n_dims=n_dims,
+                                          is_2d=is_2d,
+                                          input=input,
+                                          timepoint=timepoint,
+                                          divisor=divisor,
+                                          dtype=dtype)
+            if is_multiprocessing:
+                pool.map(partial_write_chunk, chunks)
             else:
-                chunks = tuple(
-                    (slice(z, z+chunk_shape[-3]),
-                     slice(y, y+chunk_shape[-2]),
-                     slice(x, x+chunk_shape[-1]))
-                    for z in range(0, shape[-3], chunk_shape[-3])
-                    for y in range(0, shape[-2], chunk_shape[-2])
-                    for x in range(0, shape[-1], chunk_shape[-1])
-                )
-            pool.map(partial(write_chunk,
-                             zpath=str(p / 'imgs.zarr'),
-                             t=t,
-                             n_dims=n_dims,
-                             is_2d=is_2d,
-                             input=input,
-                             timepoint=timepoint,
-                             divisor=divisor,
-                             dtype=dtype),
-                     chunks)
+                for chunk in chunks:
+                    partial_write_chunk(chunk)
             if is_message_queue:
                 publish_mq('dataset', json.dumps({'t_max': n_timepoints,
                                                   't_current': t + 1, }))
+    finally:
+        if is_multiprocessing:
+            pool.close()
 
 
 def check_dataset(dataset, shape):

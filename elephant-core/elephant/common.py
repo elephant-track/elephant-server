@@ -1109,7 +1109,8 @@ def _get_flow_prediction(img, models, keep_axials, device, patch_size=None,
     ).astype('float16')
 
 
-def _estimate_spots_with_flow(spots, flow_stack, scales, crop_box=None):
+def _estimate_spots_with_flow(spots, flow_stack, scales, resize_factor,
+                              crop_box=None):
     img_shape = flow_stack[0].shape
     n_dims = len(img_shape)
     assert n_dims == 2 or n_dims == 3, (
@@ -1124,6 +1125,7 @@ def _estimate_spots_with_flow(spots, flow_stack, scales, crop_box=None):
     if scales is None:
         scales = (1.,) * n_dims
     scales = np.array(scales)
+    resize_factor = np.array(resize_factor)
     origins = origins * scales
     MIN_AREA_ELLIPSOID = 9
     res_spots = []
@@ -1150,7 +1152,7 @@ def _estimate_spots_with_flow(spots, flow_stack, scales, crop_box=None):
         if 0 < len(indices[0]):
             displacement = [
                 flow_stack[to_fancy_index(dim, *indices)].mean()
-                * scales[-1 - dim]
+                * scales[-1 - dim] * resize_factor[-1 - dim]
                 for dim in range(n_dims)
             ]
             res_spots.append(
@@ -1241,6 +1243,7 @@ def spots_with_flow(device, spots, model_path, keep_axials=(True,) * 4,
         res_spots = _estimate_spots_with_flow(spots,
                                               prediction,
                                               scales,
+                                              resize_factor,
                                               crop_box)
     finally:
         torch.cuda.empty_cache()

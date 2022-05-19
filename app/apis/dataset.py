@@ -105,11 +105,14 @@ class Generate(Resource):
                 204
             )
         elif 1 < len(h5_files):
-            logger().info(
-                f'multiple .h5 files found, use the first one {h5_files[0]}')
+            if p_dataset / (p_dataset.name + '.h5') in h5_files:
+                h5_filename = str(p_dataset / (p_dataset.name + '.h5'))
+            else:
+                h5_filename = str(h5_files[0])
+            logger().info(f'multiple .h5 files found, use {h5_filename}')
         try:
             generate_dataset_task.delay(
-                str(h5_files[0]),
+                h5_filename,
                 str(p_dataset),
                 req_json.get('is_uint16', None),
                 req_json.get('divisor', 1.),

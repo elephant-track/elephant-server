@@ -253,7 +253,7 @@ dependencies:
   - zarr=2.11.0=pyhd8ed1ab_0
   - zfp=0.5.5=h2531618_6
   - zipp=3.6.0=pyhd3eb1b0_0
-  - zlib=1.2.11=h7b6447c_3
+  - zlib=1.2.11
   - zstd=1.5.0=ha95c52a_0
   - pip:
     - dnspython==2.1.0

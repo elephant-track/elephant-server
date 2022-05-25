@@ -64,6 +64,8 @@ from elephant.util.ellipsoid import ellipsoid
 
 api = Namespace('seg', description='Seg APIs')
 
+INDICES_THRESHOLD = 100000  # indexing takes long time for long indices
+
 
 @shared_task()
 def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
@@ -192,20 +194,22 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
     for t, spots in spots_dict.items():
         label_indices = set()
         centroids = []
+        label = np.zeros(img_shape, dtype='uint8')
+        label_vis = np.zeros(img_shape + (3,), dtype='uint8')
         if 0 < auto_bg_thresh:
-            label = np.where(
+            indices_bg = np.nonzero(
                 get_input_at(
                     za_input, t, memmap_dir=memmap_dir
-                ) < auto_bg_thresh,
-                1,
-                0
-            ).astype('uint8')
-            label_indices.update(
-                tuple(map(tuple, np.stack(np.nonzero(label), axis=1).tolist()))
+                ) < auto_bg_thresh
             )
-        else:
-            label = np.zeros(img_shape, dtype='uint8')
-        label_vis = np.zeros(img_shape + (3,), dtype='uint8')
+            label[indices_bg] = 1
+            label_vis[indices_bg] = (255, 0, 0)
+            if INDICES_THRESHOLD < len(indices_bg[0]):
+                label_indices = None
+            else:
+                label_indices.update(
+                    tuple(map(tuple, np.array(indices_bg).T))
+                )
         cnt = collections.Counter({x: 0 for x in keyorder})
         for spot in spots:
             if get_state() == TrainState.IDLE.value:
@@ -233,9 +237,15 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 img_shape,
                 MIN_AREA_ELLIPSOID
             )
-            label_indices.update(
-                tuple(map(tuple, np.stack(indices_outer, axis=1).tolist()))
-            )
+            if label_indices is not None:
+                if INDICES_THRESHOLD < len(indices_outer[0]):
+                    label_indices = None
+                else:
+                    label_indices.update(
+                        tuple(map(tuple, np.array(indices_outer).T))
+                    )
+                    if INDICES_THRESHOLD < len(label_indices):
+                        label_indices = None
             if spot['tag'] in ['tp', 'tb', 'tn']:
                 label_offset = 0
                 label_vis_value = 255
@@ -258,24 +268,23 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                label_vis[indices_outer] = np.where(
                     cond_outer_1[..., None],
                     (0, label_vis_value, 0),
-                    label_vis[to_fancy_index(*indices_outer)]
+                    label_vis[indices_outer]
                 )
                 label[indices_inner_p] = 2 + label_offset
-                label_vis[
-                    to_fancy_index(*indices_inner_p)] = (0, label_vis_value, 0)
+                label_vis[indices_inner_p] = (0, label_vis_value, 0)
                 cond_inner = np.fmod(label[indices_inner] - 1, 3) <= 2
                 label[indices_inner] = np.where(
                     cond_inner,
                     3 + label_offset,
                     label[indices_inner]
                 )
-                label_vis[to_fancy_index(*indices_inner)] = np.where(
+                label_vis[indices_inner] = np.where(
                     cond_inner[..., None],
                     (0, 0, label_vis_value),
-                    label_vis[to_fancy_index(*indices_inner)]
+                    label_vis[indices_inner]
                 )
             elif spot['tag'] in ('tb', 'fb'):
                 label[indices_outer] = np.where(
@@ -283,10 +292,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     2 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                label_vis[indices_outer] = np.where(
                     cond_outer_1[..., None],
                     (0, label_vis_value, 0),
-                    label_vis[to_fancy_index(*indices_outer)]
+                    label_vis[indices_outer]
                 )
             elif spot['tag'] in ('tn', 'fp'):
                 cond_outer_0 = np.fmod(label[indices_outer] - 1, 3) <= 0
@@ -295,31 +304,35 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     1 + label_offset,
                     label[indices_outer]
                 )
-                label_vis[to_fancy_index(*indices_outer)] = np.where(
+                label_vis[indices_outer] = np.where(
                     cond_outer_0[..., None],
                     (label_vis_value, 0, 0),
-                    label_vis[to_fancy_index(*indices_outer)]
+                    label_vis[indices_outer]
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
-        target = tuple(np.array(list(label_indices)).T)
-        target_t = to_fancy_index(t, *target)
-        target_vis = (
-            tuple(np.tile(target[i], 3) for i in range(n_dims)) +
-            (np.array(
-                sum(
-                    tuple([(c,) * len(target[0]) for c in range(3)]),
-                    ()
-                )
-            ), )
-        )
-        target_vis_t = to_fancy_index(t, *target_vis)
         for chunk in Path(za_label.store.path).glob(f'{t}.*'):
             chunk.unlink()
         for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
             chunk.unlink()
-        za_label[target_t] = label[target]
-        za_label_vis[target_vis_t] = label_vis[target_vis]
+        if label_indices is None:
+            za_label[t] = label
+            za_label_vis[t] = label_vis
+        else:
+            target = tuple(np.array(list(label_indices)).T)
+            target_t = to_fancy_index(t, *target)
+            target_vis = (
+                tuple(np.tile(target[i], 3) for i in range(n_dims)) +
+                (np.array(
+                    sum(
+                        tuple([(c,) * len(target[0]) for c in range(3)]),
+                        ()
+                    )
+                ), )
+            )
+            target_vis_t = to_fancy_index(t, *target_vis)
+            za_label[target_t] = label[target]
+            za_label_vis[target_vis_t] = label_vis[target_vis]
         za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
         if memmap_dir:

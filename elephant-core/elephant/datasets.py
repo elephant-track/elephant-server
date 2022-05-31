@@ -363,6 +363,10 @@ class SegmentationDatasetZarr(du.Dataset):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
+            za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+            if za_label_a.attrs.get('updated', False):
+                self.cache_dict_label.clear()
+                za_label_a.attrs['updated'] = False
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -394,13 +398,6 @@ class SegmentationDatasetZarr(du.Dataset):
         if self.is_ae:
             i_frame = randrange(self.za_input.shape[0])
         else:
-            # 0: unlabeled, 1: BG (LW), 2: Outer (LW), 3: Inner (LW)
-            #               4: BG (HW), 5: Outer (HW), 6: Inner (HW)
-            if RUN_ON_FLASK and self.use_cache:
-                za_label_a = zarr.open(self.zpath_seg_label, mode='a')
-                if za_label_a.attrs.get('updated', False):
-                    self.cache_dict_label.clear()
-                    za_label_a.attrs['updated'] = False
             if self.is_livemode:
                 while True:
                     v = redis_client.get(REDIS_KEY_TIMEPOINT)
@@ -757,6 +754,10 @@ class FlowDatasetZarr(du.Dataset):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
+            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+            if za_label_a.attrs.get('updated', False):
+                self.cache_dict_label.clear()
+                za_label_a.attrs['updated'] = False
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -785,11 +786,6 @@ class FlowDatasetZarr(du.Dataset):
         if (redis_client is not None and
                 get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
-        if RUN_ON_FLASK and self.use_cache:
-            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
-            if za_label_a.attrs.get('updated', False):
-                self.cache_dict_label.clear()
-                za_label_a.attrs['updated'] = False
         if self.length is not None:
             i_frame = np.random.choice(self.indices)
         else:

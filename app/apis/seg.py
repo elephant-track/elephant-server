@@ -311,11 +311,11 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
-        for chunk in Path(za_label.store.path).glob(f'{t}.*'):
-            chunk.unlink()
-        for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
-            chunk.unlink()
         if label_indices is None:
+            for chunk in Path(za_label.store.path).glob(f'{t}.*'):
+                chunk.unlink()
+            for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
+                chunk.unlink()
             za_label[t] = label
             za_label_vis[t] = label_vis
         else:
@@ -331,6 +331,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 ), )
             )
             target_vis_t = to_fancy_index(t, *target_vis)
+            for chunk in Path(za_label.store.path).glob(f'{t}.*'):
+                chunk.unlink()
+            for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
+                chunk.unlink()
             za_label[target_t] = label[target]
             za_label_vis[target_vis_t] = label_vis[target_vis]
         za_label.attrs[f'label.indices.{t}'] = centroids

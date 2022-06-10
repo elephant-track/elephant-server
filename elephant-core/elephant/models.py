@@ -184,7 +184,7 @@ class UNet(nn.Module):
         if self.is_pad:
             # the order for pad size is (left, right, top, bottom, front, back)
             pad_size = sum([[x//2, ] * 2 for x in base_size[::-1]], [])
-            x = F.pad(x, pad_size, 'reflect')
+            x = F.pad(x, pad_size, 'replicate')
         # apply encoder path
         encoder_out = []
         for level in range(self.depth):

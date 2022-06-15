@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot warmup test
+.PHONY: help rebuild build launch bash bashroot warmup test singularity-build singularity-launch singularity-stop
 
 help:
 	@cat Makefile
@@ -45,3 +45,14 @@ bashroot:
 test:
 	$(ELEPHANT_DOCKER) build -t $(ELEPHANT_IMAGE_NAME)-test -f Dockerfile-test . && $(ELEPHANT_DOCKER) image prune -f 
 	$(ELEPHANT_DOCKER) run -it --rm $(ELEPHANT_IMAGE_NAME)-test
+
+singularity-build:
+	singularity build --fakeroot elephant.sif elephant.def
+	singularity run --fakeroot elephant.sif
+
+singularity-launch:
+	singularity instance start --nv --bind $$HOME/.elephant_binds/var/lib:/var/lib,$$HOME/.elephant_binds/var/log:/var/log,$$HOME/.elephant_binds/var/run:/var/run,$$ELEPHANT_WORKSPACE:/workspace elephant.sif elephant
+	singularity exec instance://elephant /start.sh
+
+singularity-stop:
+	singularity instance stop elephant

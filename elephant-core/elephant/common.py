@@ -1353,7 +1353,8 @@ def init_seg_models(model_path, keep_axials, device, is_3d=True, n_models=1,
         if url is not None:
             logger().info(f'Loading a pretrained model: {url}')
             checkpoint = torch.hub.load_state_dict_from_url(
-                url, progress=False)
+                url, progress=False, map_location=device,
+            )
             state_dicts = checkpoint if isinstance(
                 checkpoint, list) else [checkpoint]
     models = [UNet.three_class_segmentation(
@@ -1400,7 +1401,8 @@ def init_flow_models(model_path, device, is_3d=True, n_models=1,
         if url is not None:
             logger().info(f'Loading a pretrained model: {url}')
             checkpoint = torch.hub.load_state_dict_from_url(
-                url, progress=False)
+                url, progress=False, map_location=device,
+            )
             state_dicts = checkpoint if isinstance(
                 checkpoint, list) else [checkpoint]
     models = [FlowResNet.three_dimensional_flow(

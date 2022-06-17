@@ -52,7 +52,11 @@ singularity-build:
 
 singularity-launch:
 	singularity instance start --nv --bind $(HOME)/.elephant_binds/var/lib:/var/lib,$(HOME)/.elephant_binds/var/log:/var/log,$(HOME)/.elephant_binds/var/run:/var/run,$(ELEPHANT_WORKSPACE):/workspace elephant.sif elephant
-	SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(ELEPHANT_GPU) singularity exec instance://elephant /start.sh
+	if [ $(ELEPHANT_GPU) = all ]; then \
+		singularity exec instance://elephant /start.sh; \
+	else \
+		SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(ELEPHANT_GPU) singularity exec instance://elephant /start.sh; \
+	fi 
 
 singularity-stop:
 	singularity instance stop elephant

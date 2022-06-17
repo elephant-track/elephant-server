@@ -612,18 +612,19 @@ class Reset(Resource):
             logger().error(msg)
             return make_response(jsonify(error=msg), 500)
         try:
+            device = get_device()
             if 'multipart/form-data' in request.headers['Content-Type']:
                 print(request.form)
                 req_json = json.loads(request.form.get('data'))
                 file = request.files['file']
-                checkpoint = torch.load(file.stream)
+                checkpoint = torch.load(file.stream, map_location=device)
                 state_dicts = checkpoint if isinstance(
                     checkpoint, list) else [checkpoint]
                 req_json['url'] = None
             else:
                 req_json = request.get_json()
                 state_dicts = None
-            req_json['device'] = get_device()
+            req_json['device'] = device
             config = ResetConfig(req_json)
             logger().info(config)
             redis_client.set(REDIS_KEY_STATE, TrainState.RUN.value)

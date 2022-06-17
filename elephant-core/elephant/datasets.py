@@ -498,7 +498,8 @@ class SegmentationDatasetZarr(du.Dataset):
                     fg_mean = sliced_input[fg_index].mean()
                     bg_mean = sliced_input[bg_index].mean()
                     cr_factor = (
-                        ((fg_mean - bg_mean) * uniform(0.5, 1) + bg_mean)
+                        ((fg_mean - bg_mean) * uniform(self.contrast, 1)
+                         + bg_mean)
                         / fg_mean
                     )
                     sliced_input[fg_index] *= cr_factor

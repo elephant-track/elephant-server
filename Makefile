@@ -51,8 +51,8 @@ singularity-build:
 	singularity run --fakeroot elephant.sif
 
 singularity-launch:
-	singularity instance start --nv --bind $$HOME/.elephant_binds/var/lib:/var/lib,$$HOME/.elephant_binds/var/log:/var/log,$$HOME/.elephant_binds/var/run:/var/run,$$ELEPHANT_WORKSPACE:/workspace elephant.sif elephant
-	singularity exec instance://elephant /start.sh
+	singularity instance start --nv --bind $(HOME)/.elephant_binds/var/lib:/var/lib,$(HOME)/.elephant_binds/var/log:/var/log,$(HOME)/.elephant_binds/var/run:/var/run,$(ELEPHANT_WORKSPACE):/workspace elephant.sif elephant
+	SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(ELEPHANT_GPU) singularity exec instance://elephant /start.sh
 
 singularity-stop:
 	singularity instance stop elephant

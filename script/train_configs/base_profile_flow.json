@@ -1,0 +1,29 @@
+{
+    "device": "cuda",
+    "patch": [
+        128,
+        128,
+        128
+    ],
+    "crop_size": [
+        96,
+        96,
+        96
+    ],
+    "lr": 5e-5,
+    "n_crops": 20,
+    "t_max": 1,
+    "n_epochs": 5,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0,
+    "is_3d": true,
+    "batch_size": 2,
+    "nmodels": 1,
+    "model_name": "profile_flow.pth",
+    "log_dir": "profile_flow",
+    "epoch_start": 0,
+    "cache_maxbytes": 107374182400,
+    "use_memmap": true
+}

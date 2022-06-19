@@ -13,6 +13,8 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     export UWSGI_GID=$(id -g)
     export UWSGI_CHOWN_SOCKET=$(id -u):$(id -g)
     export PYTHONPATH=/app
+    export MKL_THREADING_LAYER=GNU
+    export GRPC_POLL_STRATEGY=epoll1
 
 %post
     # Install requirements
@@ -62,6 +64,8 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     # Custom Supervisord config
     cp /docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
     sed -i 's#/usr/bin/pidproxy /var/lib/rabbitmq/mnesia/rabbitmq.pid /bin/bash -c "/rabbitmq.sh"#rabbitmq-server#g' /etc/supervisor/conf.d/supervisord.conf
+    sed -i '/user=user/d' /etc/supervisor/conf.d/supervisord.conf
+    sed -i '/group=user/d' /etc/supervisor/conf.d/supervisord.conf
 
     # Copy start.sh script that will check for a /app/prestart.sh script and run it before starting the app
     cp /docker/start.sh /start.sh

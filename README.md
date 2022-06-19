@@ -37,7 +37,7 @@ It works on client-server architecture. The server is built as a web application
 
 This repository provides an implementation of the ELEPHANT server. The ELEPHANT client can be found [here](https://github.com/elephant-track/elephant-client).
 
-Please refer to [the documentation](https://elephant-track.github.io/#/v0.2/) for details.
+Please refer to [the documentation](https://elephant-track.github.io/) for details.
 
 ---
 

@@ -24,7 +24,9 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
+from functools import partial
 import json
+import multiprocessing as mp
 from pathlib import Path
 import re
 
@@ -34,10 +36,22 @@ import zarr
 from tqdm import tqdm
 
 from elephant.logging import logger
+from elephant.logging import publish_mq
+
+
+def write_chunk(chunk, zpath, t, n_dims, is_2d, input, timepoint, divisor,
+                dtype):
+    def func(x): return x[0] if is_2d else x
+    with h5py.File(input, 'r') as f:
+        # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
+        zarr.open(zpath, 'a')[(t,) + chunk[-n_dims:]] = (
+            np.array(func(f[timepoint]['s00']['0']['cells'][chunk])) //
+            divisor
+        ).astype(dtype)
 
 
 def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
-                     connection=None):
+                     is_message_queue=False, is_multiprocessing=True):
     """Generate a dataset for ELEPHANT.
 
     Parameters
@@ -57,8 +71,10 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     is_2d : bool
         With this flag, the original image will be stored as 2d+time.
         default: False (3d+time)
-    connection : pika.BlockingConnection
-        Use optionally to report progress.
+    is_message_queue : bool
+        With this flag, progress is reported using pika.BlockingConnection.
+    is_multiprocessing : bool
+        With this flag, multiprocessing is enabled.
 
     This function will generate the following files.
 
@@ -75,35 +91,40 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
     logger().info(f'input: {input}')
     logger().info(f'output dir: {output}')
     logger().info(f'divisor: {divisor}')
-    f = h5py.File(input, 'r')
-    # timepoints are stored as 't00000', 't000001', ...
-    timepoints = list(filter(re.compile(r't\d{5}').search, list(f.keys())))
-    def func(x): return x[0] if is_2d else x
-    # determine if uint8 or uint16 dynamically
-    if is_uint16 is None:
-        is_uint16 = False
-        for timepoint in tqdm(timepoints):
-            if 255 < np.array(func(f[timepoint]['s00']['0']['cells'])).max():
-                is_uint16 = True
-                break
-    shape = f[timepoints[0]]['s00']['0']['cells'].shape
+    with h5py.File(input, 'r') as f:
+        # timepoints are stored as 't00000', 't000001', ...
+        timepoints = list(filter(re.compile(r't\d{5}').search, list(f.keys())))
+        def func(x): return x[0] if is_2d else x
+        # determine if uint8 or uint16 dynamically
+        if is_uint16 is None:
+            is_uint16 = False
+            for timepoint in tqdm(timepoints):
+                if 255 < np.array(
+                    func(f[timepoint]['s00']['0']['cells'])
+                ).max():
+                    is_uint16 = True
+                    break
+        shape = f[timepoints[0]]['s00']['0']['cells'].shape
     if is_2d:
         shape = shape[-2:]
     n_dims = 3 - is_2d  # 3 or 2
     n_timepoints = len(timepoints)
     p = Path(output)
-    img = zarr.open(
+    chunk_shape = tuple(min(s, 1024) for s in shape[-2:])
+    if not is_2d:
+        chunk_shape = (1,) + chunk_shape
+    zarr.open(
         str(p / 'imgs.zarr'),
         'w',
         shape=(n_timepoints,) + shape,
-        chunks=(1,) + shape,
+        chunks=(1,) + chunk_shape,
         dtype='u2' if is_uint16 else 'u1'
     )
     zarr.open(
         str(p / 'flow_outputs.zarr'),
         'w',
         shape=(n_timepoints - 1, n_dims,) + shape,
-        chunks=(1, 1,) + shape,
+        chunks=(1, 1,) + chunk_shape,
         dtype='f2'
     )
     zarr.open(
@@ -116,44 +137,71 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         str(p / 'flow_labels.zarr'),
         'w',
         shape=(n_timepoints - 1, n_dims + 1,) + shape,
-        chunks=(1, 1,) + shape,
+        chunks=(1, 1,) + chunk_shape,
         dtype='f4'
     )
     zarr.open(
         str(p / 'seg_outputs.zarr'),
         'w',
         shape=(n_timepoints,) + shape + (3,),
-        chunks=(1,) + shape + (3,),
+        chunks=(1,) + chunk_shape + (1,),
         dtype='f2'
     )
     zarr.open(
         str(p / 'seg_labels.zarr'),
         'w',
         shape=(n_timepoints,) + shape,
-        chunks=(1,) + shape, dtype='u1'
+        chunks=(1,) + chunk_shape, dtype='u1'
     )
     zarr.open(
         str(p / 'seg_labels_vis.zarr'),
         'w',
         shape=(n_timepoints,) + shape + (3,),
-        chunks=(1,) + shape + (3,),
+        chunks=(1,) + chunk_shape + (1,),
         dtype='u1'
     )
     dtype = np.uint16 if is_uint16 else np.uint8
-    for t, timepoint in tqdm(enumerate(timepoints)):
-        # https://arxiv.org/pdf/1412.0488.pdf "2.4 HDF5 File Format"
-        img[int(timepoint[1:])] = (
-            np.array(func(f[timepoint]['s00']['0']['cells'])) // divisor
-        ).astype(dtype)
-        if connection is not None:
-            connection.channel().basic_publish(
-                exchange='',
-                routing_key='dataset',
-                body=json.dumps({
-                    't_max': n_timepoints,
-                    't_current': t + 1,
-                })
-            )
+    if n_dims == 2:
+        chunks = tuple(
+            (slice(None),
+                slice(y, y+chunk_shape[-2]),
+                slice(x, x+chunk_shape[-1]))
+            for y in range(0, shape[-2], chunk_shape[-2])
+            for x in range(0, shape[-1], chunk_shape[-1])
+        )
+    else:
+        chunks = tuple(
+            (slice(z, z+chunk_shape[-3]),
+                slice(y, y+chunk_shape[-2]),
+                slice(x, x+chunk_shape[-1]))
+            for z in range(0, shape[-3], chunk_shape[-3])
+            for y in range(0, shape[-2], chunk_shape[-2])
+            for x in range(0, shape[-1], chunk_shape[-1])
+        )
+    if is_multiprocessing:
+        pool = mp.Pool()
+    try:
+        for t, timepoint in tqdm(enumerate(timepoints)):
+            partial_write_chunk = partial(write_chunk,
+                                          zpath=str(p / 'imgs.zarr'),
+                                          t=t,
+                                          n_dims=n_dims,
+                                          is_2d=is_2d,
+                                          input=input,
+                                          timepoint=timepoint,
+                                          divisor=divisor,
+                                          dtype=dtype)
+            if is_multiprocessing:
+                pool.map(partial_write_chunk, chunks)
+            else:
+                for chunk in chunks:
+                    partial_write_chunk(chunk)
+            if is_message_queue:
+                publish_mq('dataset', json.dumps({'t_max': n_timepoints,
+                                                  't_current': t + 1, }))
+    finally:
+        if is_multiprocessing:
+            pool.close()
 
 
 def check_dataset(dataset, shape):

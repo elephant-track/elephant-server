@@ -1,0 +1,11 @@
+[
+    {
+        "dataset_name": "BDV_MVD_5v_final",
+        "n_keep_axials": 0,
+        "input_size": [
+            510,
+            483,
+            498
+        ]
+    }
+]

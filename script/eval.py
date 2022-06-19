@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+# ==============================================================================
 # Copyright (c) 2020, Ko Sugawara
 # All rights reserved.
 #
@@ -22,6 +24,38 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
-"""Version definition."""
+"""Commandline interface for prediction and export using a config file."""
 
-__version__ = '0.4.0'
+from elephant.common import detect_spots
+from elephant.config import SegmentationEvalConfig
+
+
+def main():
+    config_dict = {
+        'dataset_name': "CMU-1",
+        'timepoint': 0,
+        'model_name': "CMU-1_detection.pth",
+        "device": "cuda",
+        "is_3d": False,
+        "crop_size": [384, 384],
+        "scales": [0.5, 0.5],
+        "cache_maxbytes": 0,
+        "use_median": True,
+        "patch": [4096, 4096],
+        "use_memmap": False,
+    }
+    config = SegmentationEvalConfig(config_dict)
+    print(config)
+    detect_spots(
+        str(config.device), config.model_path, config.keep_axials,
+        config.is_pad, config.is_3d, config.crop_size, config.scales,
+        config.cache_maxbytes, config.use_2d, config.use_median,
+        config.patch_size, config.crop_box, config.c_ratio, config.p_thresh,
+        config.r_min, config.r_max, config.output_prediction,
+        config.zpath_input, config.zpath_seg_output, config.timepoint,
+        None, config.memmap_dir, config.batch_size, config.input_size,
+    )
+
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,4 @@
-# Copyright (c) 2020, Ko Sugawara
+# Copyright (c) 2022, Ko Sugawara
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -22,6 +22,47 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
-"""Version definition."""
+from flask_restx import Api
 
-__version__ = '0.4.0'
+from elephant import __version__
+
+from .dataset import api as dataset
+from .download import api as download
+from .flow import api as flow
+from .params import api as params
+from .seg import api as seg
+from .state import api as state
+from .upload import api as upload
+
+
+def init_api(app):
+    """
+    Initialize Api and returns it.
+
+    Parameters
+    ----------
+    app : Flask
+        Flask object.
+
+    Returns
+    -------
+    api : flask_restx.Api
+        Api object.
+
+    """
+    api = Api(
+        app=app,
+        version=__version__,
+        title='ELEPHANT',
+        description='ELEPHANT API',
+    )
+
+    api.add_namespace(dataset, path='/dataset')
+    api.add_namespace(download, path='/download')
+    api.add_namespace(flow, path='/flow')
+    api.add_namespace(params, path='/params')
+    api.add_namespace(seg, path='/seg')
+    api.add_namespace(state, path='/state')
+    api.add_namespace(upload, path='/upload')
+
+    return api

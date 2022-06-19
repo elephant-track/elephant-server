@@ -29,9 +29,14 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 
+import torch
+
+from elephant.util import get_device
+
 DATASETS_DIR = '/workspace/datasets'
 MODELS_DIR = '/workspace/models'
 LOGS_DIR = '/workspace/logs'
+MEMMAPS_DIR = '/workspace/memmaps'
 
 ZARR_INPUT = 'imgs.zarr'
 ZARR_SEG_OUTPUT = 'seg_outputs.zarr'
@@ -60,7 +65,10 @@ class BaseConfig():
         if config.get('model_name') is not None:
             self.model_path = os.path.join(
                 MODELS_DIR, config.get('model_name'))
-        self.device = config.get('device')
+        self.device = config.get('device', get_device())
+        if not torch.cuda.is_available():
+            self.device = torch.device("cpu")
+        self.is_mixed_precision = config.get('is_mixed_precision', True)
         self.debug = config.get('debug', False)
         self.output_prediction = config.get('output_prediction', False)
         self.is_3d = config.get('is_3d', True)
@@ -68,12 +76,17 @@ class BaseConfig():
         self.batch_size = config.get('batch_size', 1)
         self.patch_size = config.get('patch')
         self.log_interval = config.get('log_interval', 10)
+        self.cache_maxbytes = config.get('cache_maxbytes')
         if self.patch_size is not None:
             self.patch_size = self.patch_size[::-1]
         if config.get('scales') is not None:
             self.scales = config.get('scales')[::-1]
         else:
             self.scales = None
+        if config.get('input_size') is not None:
+            self.input_size = tuple(config.get('input_size')[::-1])
+        else:
+            self.input_size = None
         # U-Net has 4 downsamplings
         n_keep_axials = min(4, config.get('n_keep_axials', 4))
         self.keep_axials = tuple(True if i < n_keep_axials else False
@@ -85,12 +98,22 @@ class BaseConfig():
             if self.scales is not None:
                 self.scales = self.scales[-2:]
             self.crop_size = self.crop_size[-2:]
+            if self.input_size is not None:
+                self.input_size = self.input_size[-2:]
         if self.dataset_name is not None:
             self.zpath_input = os.path.join(DATASETS_DIR,
                                             self.dataset_name,
                                             ZARR_INPUT)
         else:
             self.zpath_input = None
+        if config.get('use_memmap'):
+            self.memmap_dir = MEMMAPS_DIR
+            Path(self.memmap_dir).mkdir(parents=True, exist_ok=True)
+        else:
+            self.memmap_dir = None
+
+    def is_cpu(self):
+        return str(self.device) == 'cpu'
 
     def __str__(self):
         result = []
@@ -125,12 +148,12 @@ class ExportConfig(BaseConfig):
 class SegmentationEvalConfig(BaseConfig):
     def __init__(self, config):
         super().__init__(config)
-        self.use_median = config.get('use_median')
+        self.use_median = config.get('use_median', False)
         self.is_pad = config.get('is_pad', False)
-        self.c_ratio = config.get('c_ratio')
-        self.p_thresh = config.get('p_thresh')
-        self.r_min = config.get('r_min')
-        self.r_max = config.get('r_max')
+        self.c_ratio = config.get('c_ratio', 0.4)
+        self.p_thresh = config.get('p_thresh', 0.5)
+        self.r_min = config.get('r_min', 0)
+        self.r_max = config.get('r_max', 1e6)
         crop_box = config.get('crop_box')
         if crop_box is not None:
             crop_box = crop_box[:3][::-1] + crop_box[3:][::-1]
@@ -182,12 +205,18 @@ class SegmentationTrainConfig(SegmentationEvalConfig):
 class FlowEvalConfig(BaseConfig):
     def __init__(self, config):
         super().__init__(config)
+        self.use_median = config.get('use_median', False)
+        self.is_pad = config.get('is_pad', False)
         max_displacement = config.get('max_displacement',
                                       DEFAULT_MAX_DISPLACEMENT)
         self.flow_norm_factor = (
             float(max_displacement),  # X
             float(max_displacement),  # Y
             float(max_displacement / (2**config.get('n_keep_axials', 0))))  # Z
+        crop_box = config.get('crop_box')
+        if crop_box is not None:
+            crop_box = crop_box[:3][::-1] + crop_box[3:][::-1]
+        self.crop_box = crop_box
         if self.dataset_name is not None:
             self.zpath_flow = os.path.join(DATASETS_DIR,
                                            self.dataset_name,

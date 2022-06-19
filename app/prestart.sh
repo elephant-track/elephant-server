@@ -1,3 +1,4 @@
 #! /usr/bin/env bash
 
-echo "There is no command to run in prestart.sh"
+echo "set RUN_ON_FLASK"
+export RUN_ON_FLASK=""

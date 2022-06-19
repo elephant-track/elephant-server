@@ -172,24 +172,29 @@ class UNet(nn.Module):
                 True)
 
     def forward(self, input, keep_axials):
+        n_batches = input.shape[0]
         if self.is_3d:
-            base_size = (2**keep_axials.count(False), 16, 16)
+            z_poolings = max([int(len(ka) - ka.sum()) for ka in keep_axials])
+            base_size = (2**z_poolings, 16, 16)
         else:
             base_size = (16, 16)
+        # resize if required
+        x, is_resized = self._conform(input, base_size)
         # pad if specified
         if self.is_pad:
             # the order for pad size is (left, right, top, bottom, front, back)
             pad_size = sum([[x//2, ] * 2 for x in base_size[::-1]], [])
-            input = F.pad(input, pad_size, 'replicate')
-        # resize if required
-        x, is_resized = self._conform(input, base_size)
+            x = F.pad(x, pad_size, 'replicate')
         # apply encoder path
         encoder_out = []
         for level in range(self.depth):
             x = self.encoder[level](x)
             encoder_out.append(x)
             # the pooling layers; we use 2x2 MaxPooling
-            x = self._pooler(keep_axials[level])(x)
+            x = torch.cat([
+                self._pooler(keep_axials[n, level])(x[n:n+1])
+                for n in range(n_batches)
+            ])
 
         # apply base
         x = self.base(x)
@@ -198,25 +203,29 @@ class UNet(nn.Module):
         encoder_out = encoder_out[::-1]
         for level in range(self.depth):
             # the upsampling layers
-            x = self._upsampler(keep_axials[::-1][level])(x)
+            x = torch.cat([
+                self._upsampler(keep_axials[n, -(1 + level)])(x[n:n+1])
+                for n in range(n_batches)
+            ])
             x = self.decoder[level](torch.cat((encoder_out[level], x), dim=1))
 
         # apply output conv and activation (if given)
         x = self.out_conv(x)
         if self.activation is not None:
             x = self.activation(x)
+        # remove pad if specified
+        if self.is_pad:
+            slices = (slice(None), slice(None)) + tuple(
+                slice(pad_size[-(2+2*i)], -pad_size[-(1+2*i)])
+                for i in range(self.n_dims)
+            )
+            x = x[slices]
         # put back to the original size
         if is_resized:
             x = F.interpolate(x,
                               self.org_size,
                               mode=self.interpolate_mode,
                               align_corners=True)
-        if self.is_pad:
-            slices = (slice(None), slice(None)) + tuple(
-                slice(self.pad_size[-(2+2*i)], -self.pad_size[-(1+2*i)])
-                for i in range(self.n_dims)
-            )
-            x = x[slices]
         return x
 
     @ classmethod

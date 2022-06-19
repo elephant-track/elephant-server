@@ -41,7 +41,7 @@ def weight_init(m):
 def test_three_class_segmentation():
     model = UNet.three_class_segmentation(is_eval=True)
     model.apply(weight_init)
-    keep_axials = (True,) * 4
+    keep_axials = torch.tensor((True,) * 4)[None]
     x = torch.tensor([[[[[0.0213, 0.1214, 0.5833, 0.4821, 0.9276],
                          [0.1276, 0.1708, 0.8123, 0.7659, 0.6194],
                          [0.6735, 0.5342, 0.3016, 0.1573, 0.4630],
@@ -177,7 +177,7 @@ def test_three_class_segmentation():
 def test_three_dimensional_flow():
     model = FlowResNet.three_dimensional_flow(is_eval=True)
     model.apply(weight_init)
-    keep_axials = (True,) * 4
+    keep_axials = torch.tensor((True,) * 4)[None]
     x = torch.tensor([[[[[0.1186, 0.2931, 0.8046, 0.3549, 0.3548],
                          [0.3617, 0.1403, 0.6212, 0.4167, 0.4423],
                          [0.0822, 0.0843, 0.7522, 0.3163, 0.7114],

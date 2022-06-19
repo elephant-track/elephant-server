@@ -24,7 +24,31 @@
 # ==============================================================================
 """Exposing utility functions."""
 
+from collections import OrderedDict
+import os
+import sys
+
+import numpy as np
 import torch
+
+RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
+
+
+def to_fancy_index(*data):
+    """Build fancy index with broadcast.
+
+    Parameters
+    ----------
+    *data : int, ndarray
+        Indices to be used for building fancy index.
+
+    Example
+    -------
+    >>> to_fancy_index(0, np.array([1, 1]), np.array([2, 2]), 3)
+    (array([0, 0]), array([1, 1]), array([2, 2]), array([3, 3]))
+
+    """
+    return tuple(np.array(tuple(np.broadcast(*data))).T)
 
 
 def get_next_multiple(value, base):
@@ -44,10 +68,10 @@ def get_pad_size(size, base):
 
 
 def normalize_zero_one(data):
-    if data.min() == data.max():
-        return data
     data -= data.min()
-    data /= data.max()
+    data_max = data.max()
+    if 0 < data_max:
+        data /= data_max
     return data
 
 
@@ -60,3 +84,32 @@ def get_device():
         print("GPU is not available")
         device = torch.device("cpu")
     return device
+
+
+class LRUCacheDict:
+
+    def __init__(self, maxbytes=1024*1024):
+        """ Construct a LRUCacheDict with the cache size.
+
+        Args:
+            maxbytes (int): size of the memory capacity for cache in byte.
+        """
+        self.cache = OrderedDict()
+        self.maxbytes = maxbytes
+
+    def clear(self):
+        self.cache = OrderedDict()
+
+    def get(self, key, default=None):
+        if key not in self.cache:
+            if default is None:
+                return None
+            self.cache[key] = default
+        self.cache.move_to_end(key)
+        item = self.cache[key]
+        while self.maxbytes < self.size():
+            self.cache.popitem(0)
+        return item
+
+    def size(self):
+        return sum(sys.getsizeof(v) for v in self.cache.values())

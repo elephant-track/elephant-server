@@ -26,14 +26,38 @@
 
 from enum import Enum
 
-REDIS_KEY_COUNT = 'count'
+import redis
+
+from elephant.util import RUN_ON_FLASK
+
 REDIS_KEY_LR = 'lr'
 REDIS_KEY_NCROPS = 'n_crops'
 REDIS_KEY_STATE = 'state'
 REDIS_KEY_TIMEPOINT = 'timepoint'
+REDIS_KEY_UPDATE_ONGOING_SEG = 'update_ongoing_seg'
+REDIS_KEY_UPDATE_ONGOING_FLOW = 'update_ongoing_flow'
 
 
 class TrainState(Enum):
     IDLE = 0
     RUN = 1
     WAIT = 2
+
+
+if RUN_ON_FLASK:
+    redis_client = redis.Redis.from_url('redis://localhost:6379/0')
+else:
+    redis_client = None
+
+
+def get_state():
+    """
+    Returns the current state.
+
+    Returns
+    -------
+    state : int
+        current state
+
+    """
+    return int(redis_client.get(REDIS_KEY_STATE))

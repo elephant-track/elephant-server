@@ -40,10 +40,12 @@ RUN chmod +x /rabbitmq.sh
 # Set up nginx
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80 443
-RUN groupadd nginx && useradd -g nginx nginx
+RUN groupadd -r nginx && useradd -r -g nginx nginx
 # forward request and error logs to docker log collector
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
+
+RUN pip install memory_profiler line_profiler
 
 # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
 COPY docker/uwsgi.ini /etc/uwsgi/uwsgi.ini

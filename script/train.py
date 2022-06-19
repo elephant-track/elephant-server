@@ -28,17 +28,20 @@
 import argparse
 import io
 import json
+import os
+from pathlib import Path
 
+from tensorflow.data import TFRecordDataset
+from tensorflow.core.util import event_pb2
 import torch
+import torch.multiprocessing as mp
 from torch.utils.data.dataset import ConcatDataset
 from torch.utils.data import DataLoader
 import zarr
 
-from elephant.common import TensorBoard
-from elephant.common import evaluate
 from elephant.common import load_flow_models
 from elephant.common import load_seg_models
-from elephant.common import train
+from elephant.common import run_train
 from elephant.config import FlowTrainConfig
 from elephant.config import ResetConfig
 from elephant.config import SegmentationTrainConfig
@@ -46,6 +49,8 @@ from elephant.datasets import FlowDatasetZarr
 from elephant.datasets import SegmentationDatasetZarr
 from elephant.losses import FlowLoss
 from elephant.losses import SegmentationLoss
+
+PROFILE = "ELEPHANT_PROFILE" in os.environ
 
 
 def main():
@@ -66,6 +71,9 @@ def main():
         config_data = json.load(jsonfile)
     # load or initialize models
 
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
     # prepare dataset
     train_datasets = []
     eval_datasets = []
@@ -76,7 +84,7 @@ def main():
         n_dims = 2 + config.is_3d  # 3 or 2
         models = load_models(config, args.command)
         za_input = zarr.open(config.zpath_input, mode='r')
-        input_shape = za_input.shape[-n_dims:]
+        input_size = config_dict.get('input_size', za_input.shape[-n_dims:])
         train_index = []
         eval_index = []
         eval_interval = config_dict.get('evalinterval')
@@ -103,7 +111,7 @@ def main():
                 config.zpath_input,
                 config.zpath_seg_label,
                 train_index,
-                input_shape,
+                input_size,
                 config.crop_size,
                 config.n_crops,
                 keep_axials=config.keep_axials,
@@ -112,18 +120,22 @@ def main():
                 contrast=config.contrast,
                 rotation_angle=config.rotation_angle,
                 length=train_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
             eval_datasets.append(SegmentationDatasetZarr(
                 config.zpath_input,
                 config.zpath_seg_label,
                 eval_index,
-                input_shape,
-                input_shape,
+                input_size,
+                input_size,
                 1,
                 keep_axials=config.keep_axials,
                 is_eval=True,
                 length=eval_length,
                 adaptive_length=adaptive_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
         elif args.command == 'flow':
             config = FlowTrainConfig(config_dict)
@@ -143,29 +155,34 @@ def main():
                 config.zpath_input,
                 config.zpath_flow_label,
                 train_index,
-                input_shape,
+                input_size,
                 config.crop_size,
                 config.n_crops,
                 keep_axials=config.keep_axials,
                 scales=config.scales,
                 scale_factor_base=config.scale_factor_base,
                 rotation_angle=config.rotation_angle,
+                length=train_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
             eval_datasets.append(FlowDatasetZarr(
                 config.zpath_input,
                 config.zpath_flow_label,
                 eval_index,
-                input_shape,
-                config.crop_size,
-                config.n_crops,
+                input_size,
+                input_size,
+                1,
                 keep_axials=config.keep_axials,
-                scales=config.scales,
-                scale_factor_base=0.0,
+                is_eval=True,
+                length=eval_length,
+                adaptive_length=adaptive_length,
+                cache_maxbytes=config.cache_maxbytes,
+                memmap_dir=config.memmap_dir,
             ))
     train_dataset = ConcatDataset(train_datasets)
     eval_dataset = ConcatDataset(eval_datasets)
     if 0 < len(train_dataset):
-        logger = TensorBoard(config.log_dir)
         if args.command == 'seg':
             weight_tensor = torch.tensor(config.class_weights)
             loss_fn = SegmentationLoss(class_weights=weight_tensor,
@@ -173,68 +190,37 @@ def main():
                                        is_3d=config.is_3d)
         elif args.command == 'flow':
             loss_fn = FlowLoss(is_3d=config.is_3d)
-        loss_fn = loss_fn.to(config.device)
         optimizers = [torch.optim.Adam(
             model.parameters(), lr=config.lr) for model in models]
         train_loader = DataLoader(
             train_dataset, shuffle=True, batch_size=config.batch_size)
         eval_loader = DataLoader(
             eval_dataset, shuffle=False, batch_size=config.batch_size)
-        if 0 < len(eval_loader):
-            min_loss = sum([evaluate(model,
-                                     config.device,
-                                     eval_loader,
-                                     loss_fn=loss_fn,
-                                     epoch=-1,
-                                     patch_size=config.patch_size)
-                            for model in models]) / len(models)
-            state_dicts = ([models[0].state_dict()] if len(models) == 1
-                           else
-                           [model.state_dict() for model in models])
-
-        for epoch in range(config.epoch_start,
-                           config.epoch_start + config.n_epochs):
-            if args.command == 'flow' and epoch == 50:
-                optimizers = [
-                    torch.optim.Adam(model.parameters(), lr=config.lr*0.1)
-                    for model in models
-                ]
-            loss = 0
-            for model, optimizer in zip(models, optimizers):
-                train(model,
-                      config.device,
-                      train_loader,
-                      optimizer=optimizer,
-                      loss_fn=loss_fn,
-                      epoch=epoch,
-                      log_interval=config.log_interval,
-                      tb_logger=logger)
-                if 0 < len(eval_loader):
-                    loss += evaluate(model,
-                                     config.device,
-                                     eval_loader,
-                                     loss_fn=loss_fn,
-                                     epoch=epoch,
-                                     tb_logger=logger,
-                                     patch_size=config.patch_size)
-            loss /= len(models)
-            if 0 < len(eval_loader):
-                if loss < min_loss:
-                    min_loss = loss
-                    state_dicts = (models[0].state_dict() if len(models) == 1
-                                   else
-                                   [model.state_dict() for model in models])
-                    torch.save(state_dicts,
-                               config.model_path.replace('.pth', '_best.pth'))
-                    if len(models) == 1:
-                        state_dicts = [state_dicts]
-                else:
-                    pass
-                    # for model, state_dict in zip(models, state_dicts):
-                    #     model.load_state_dict(state_dict)
-            torch.save(models[0].state_dict() if len(models) == 1 else
-                       [model.state_dict() for model in models],
-                       config.model_path)
+        step_offset = 0
+        for path in sorted(Path(config.log_dir).glob('event*')):
+            try:
+                *_, last_record = TFRecordDataset(str(path))
+                last = event_pb2.Event.FromString(last_record.numpy()).step
+                step_offset = max(step_offset, last+1)
+            except Exception:
+                pass
+        if PROFILE:
+            run_train(config.device, 1, models, train_loader, optimizers,
+                      loss_fn, config.n_epochs, config.model_path, False,
+                      config.log_interval, config.log_dir, step_offset,
+                      config.epoch_start, eval_loader, config.patch_size,
+                      config.is_cpu(), args.command == 'seg')
+        else:
+            world_size = (2 if config.is_cpu() else
+                          torch.cuda.device_count())
+            mp.spawn(run_train,
+                     args=(world_size, models, train_loader, optimizers,
+                           loss_fn, config.n_epochs, config.model_path, False,
+                           config.log_interval, config.log_dir, step_offset,
+                           config.epoch_start, eval_loader, config.patch_size,
+                           config.is_cpu(), args.command == 'seg'),
+                     nprocs=world_size,
+                     join=True)
 
 
 def load_models(config, command):

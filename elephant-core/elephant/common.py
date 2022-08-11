@@ -571,7 +571,7 @@ def evaluate(model, device, loader, loss_fn, patch_size=None, is_ddp=False,
                 prediction = torch.from_numpy(
                     predict(model, device, x, keep_axials, patch_size,
                             is_logarithm=False, is_logging=is_logging,
-                            batchsize=1, is_dp=False)
+                            batch_size=1, is_dp=False)
                 ).to(device)
             loss += loss_fn(prediction, y).item()
         loss /= len(loader)

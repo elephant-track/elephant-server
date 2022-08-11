@@ -159,6 +159,8 @@ def _update_flow_labels(spots_dict,
             ),
         ) + tuple(np.tile(target[i], n_dims + 1) for i in range(n_dims))
         target_t = (np.full(len(target[0]), t),) + target
+        for chunk in Path(za_label.store.path).glob(f'{t}.*'):
+            chunk.unlink()
         za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
         za_label[target_t] = label[target]

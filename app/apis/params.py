@@ -46,8 +46,8 @@ class Root(Resource):
         '''
         return make_response(
             jsonify(success=True,
-                    lr=float(redis_client.get(REDIS_KEY_LR)),
-                    n_crops=int(redis_client.get(REDIS_KEY_NCROPS)))
+                    lr=float(redis_client.get(REDIS_KEY_LR, 0)),
+                    n_crops=int(redis_client.get(REDIS_KEY_NCROPS, 0)))
         )
 
     def post(self):

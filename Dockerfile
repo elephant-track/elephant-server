@@ -46,6 +46,8 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
 RUN pip install memory_profiler line_profiler
+RUN pip install jupyter
+RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 
 # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
 COPY docker/uwsgi.ini /etc/uwsgi/uwsgi.ini
@@ -74,6 +76,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 
 COPY ./elephant-core /tmp/elephant-core
 RUN pip install -U /tmp/elephant-core && rm -rf /tmp/elephant-core
+
 
 # Run the start script provided by the parent image tiangolo/uwsgi-nginx.
 # It will check for an /app/prestart.sh script (e.g. for migrations)

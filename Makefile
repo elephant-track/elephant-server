@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot warmup test singularity-build singularity-launch singularity-stop
+.PHONY: help rebuild build launch bash bashroot notebook warmup test singularity-build singularity-launch singularity-stop
 
 help:
 	@cat Makefile
@@ -41,6 +41,11 @@ bash: warmup
 bashroot:
 	$(ELEPHANT_DOCKER) run -it --rm --gpus '"device=$(ELEPHANT_GPU)"' --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
+
+notebook: warmup
+	$(ELEPHANT_DOCKER) run -it --rm --gpus '"device=$(ELEPHANT_GPU)"' --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
+	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
+	--network host -p 8888:8888 $(ELEPHANT_IMAGE_NAME) jupyter notebook --no-browser --notebook-dir=/workspace
 
 test:
 	$(ELEPHANT_DOCKER) build -t $(ELEPHANT_IMAGE_NAME)-test -f Dockerfile-test . && $(ELEPHANT_DOCKER) image prune -f 

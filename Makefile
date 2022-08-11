@@ -5,7 +5,7 @@ help:
 
 ELEPHANT_GPU?=all
 ELEPHANT_WORKSPACE?=${PWD}/workspace
-ELEPHANT_IMAGE_NAME?=elephant-server:0.4.1
+ELEPHANT_IMAGE_NAME?=elephant-server:0.5.0-dev
 ELEPHANT_NVIDIA_GID?=$$(ls -n /dev/nvidia0 2>/dev/null | awk '{print $$4}')
 ELEPHANT_DOCKER?=docker
 

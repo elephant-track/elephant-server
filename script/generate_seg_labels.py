@@ -38,8 +38,10 @@ import skimage.measure
 from tqdm import tqdm
 import zarr
 
+from elephant.util import dilate
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
+from elephant.util.scaled_moments import radii_and_rotation
 
 
 def main():
@@ -132,10 +134,10 @@ def main():
                             print(f'generate {2 + is_3d}D labels')
                             if is_3d:
                                 draw_func = ellipsoid
-                                dilate_func = _dilate_3d_indices
+                                dilate_func = dilate.dilate_3d_indices
                             else:
                                 draw_func = ellipse
-                                dilate_func = _dilate_2d_indices
+                                dilate_func = dilate.dilate_2d_indices
                             shape = img.shape[-(2 + is_3d):]
                             dtype = img.dtype
                         unique_files.add(f.name)
@@ -200,7 +202,7 @@ def main():
                                 if region.minor_axis_length == 0:
                                     continue
                                 try:
-                                    radii, rotation = _radii_and_rotation(
+                                    radii, rotation = radii_and_rotation(
                                         region.moments_central, is_3d
                                     )
                                     if (radii == 0).any():
@@ -247,75 +249,6 @@ def main():
                             za_seg[count] = seg
                             count += 1
                             visited_files.add(f.name)
-
-
-def _radii_and_rotation(moments_central, is_3d):
-    if is_3d:
-        n_dims = 3
-        idx = ((2, 1, 1, 1, 0, 0, 1, 0, 0),
-               (0, 1, 0, 1, 2, 1, 0, 1, 0),
-               (0, 0, 1, 0, 0, 1, 1, 1, 2))
-    else:
-        n_dims = 2
-        idx = ((2, 1, 1, 0),
-               (0, 1, 1, 2))
-    cov = moments_central[idx].reshape((n_dims, n_dims))
-    if not cov.any():  # if all zeros
-        raise RuntimeError('covariance is all zeros')
-    cov /= moments_central[(0,) * n_dims]
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    if ((eigvals < 0).any() or
-        np.iscomplex(eigvals).any() or
-            np.iscomplex(eigvecs).any()):
-        raise RuntimeError('invalid eigen values/vectors')
-    radii = np.sqrt(eigvals)
-    rotation = eigvecs
-    return radii, rotation
-
-
-def _dilate_2d_indices(rr, cc, shape):
-    if len(rr) != len(cc):
-        raise RuntimeError('indices should have the same length')
-    n_pixels = len(rr)
-    rr_dilate = np.array([0, ] * (n_pixels * 3 ** 2))
-    cc_dilate = np.copy(rr_dilate)
-    offset = 0
-    try:
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                rr_dilate[offset:offset +
-                          n_pixels] = (rr + dy).clip(0, shape[0] - 1)
-                cc_dilate[offset:offset +
-                          n_pixels] = (cc + dx).clip(0, shape[1] - 1)
-                offset += n_pixels
-    except IndexError:
-        print(rr, cc, shape)
-    unique_dilate = np.unique(
-        np.stack((rr_dilate, cc_dilate)), axis=1)
-    return unique_dilate[0], unique_dilate[1]
-
-
-def _dilate_3d_indices(dd, rr, cc, shape):
-    if len(dd) != len(rr) or len(dd) != len(cc):
-        raise RuntimeError('indices should have the same length')
-    n_pixels = len(dd)
-    dd_dilate = np.array([0, ] * (n_pixels * 3 ** 3))
-    rr_dilate = np.copy(dd_dilate)
-    cc_dilate = np.copy(dd_dilate)
-    offset = 0
-    for dz in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                dd_dilate[offset:offset +
-                          n_pixels] = (dd + dz).clip(0, shape[0] - 1)
-                rr_dilate[offset:offset +
-                          n_pixels] = (rr + dy).clip(0, shape[1] - 1)
-                cc_dilate[offset:offset +
-                          n_pixels] = (cc + dx).clip(0, shape[2] - 1)
-                offset += n_pixels
-    unique_dilate = np.unique(
-        np.stack((dd_dilate, rr_dilate, cc_dilate)), axis=1)
-    return unique_dilate[0], unique_dilate[1], unique_dilate[2]
 
 
 if __name__ == '__main__':

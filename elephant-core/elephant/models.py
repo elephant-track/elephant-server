@@ -216,7 +216,7 @@ class UNet(nn.Module):
         # remove pad if specified
         if self.is_pad:
             slices = (slice(None), slice(None)) + tuple(
-                slice(pad_size[-(2+2*i)], -pad_size[-(1+2*i)])
+                slice(pad_size[-(2+2*i)], x.shape[2+i] - pad_size[-(1+2*i)])
                 for i in range(self.n_dims)
             )
             x = x[slices]

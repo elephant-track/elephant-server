@@ -46,7 +46,7 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
 RUN pip install memory_profiler line_profiler
-RUN pip install jupyter
+RUN mamba install jupyter
 RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 
 # Copy the base uWSGI ini file to enable default dynamic uwsgi process number

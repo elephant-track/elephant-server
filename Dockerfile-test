@@ -1,4 +1,4 @@
-FROM elephant-server:0.4.3
+FROM elephant-server:0.4.4
 
 LABEL maintainer="Ko Sugawara <ko.sugawara@ens-lyon.fr>"
 

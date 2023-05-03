@@ -204,7 +204,212 @@ class DatasetPrediction(du.Dataset):
                 self.keep_axials[data_ind], data_ind, patch_ind)
 
 
-class SegmentationDatasetZarr(du.Dataset):
+class SegmentationDatasetBase(du.Dataset):
+    def __init__(self, crop_size, keep_axials=(True,) * 4, scales=None,
+                 scale_factor_base=0, rotation_angle=None, contrast=0.5,
+                 is_eval=False):
+        """Generate dataset for segmentation.
+
+        Args:
+            crop_size(array-like of length ndim): crop size to generate dataset.
+            keep_axials(array-like of length 4): this value is used to calculate
+                how many times down/up sampling are performed in z direction.
+                Ignored for 2D data.
+            scales(array-like of length ndim): a list of pixel/voxel size in
+                physical unit (e.g. 0.5 μm/px). This is used to calculate scale
+                factors for augmentation.
+            scale_factor_base(float): a base scale factor for augmentation.
+            rotation_angle(float): rotation angle for augmentation in degree.
+            contrast(float): contrast factor for augmentation.
+            is_eval(boolean): True if the dataset is for evaluation, where no
+                augmentation is performed.
+        """
+        if scale_factor_base < 0 or 1 <= scale_factor_base:
+            raise ValueError(
+                'scale_factor_base should be 0 <= scale_factor_base < 1'
+            )
+        self.n_dims = len(crop_size)
+        if scales is None:
+            scales = (1.,) * self.n_dims
+        scale_factors = tuple(
+            scale_factor_base * min(scales) / scales[i]
+            for i in range(self.n_dims)
+        )
+        self.crop_size = crop_size
+        self.scale_factors = scale_factors
+        self.rotation_angle = rotation_angle
+        self.contrast = contrast
+        self.is_eval = is_eval
+        self.keep_axials = torch.tensor(keep_axials)
+
+    def _generate_item(self, img_input, img_label, crop_size):
+        if self.is_eval:
+            tensor_input = torch.from_numpy(img_input[None])
+            tensor_label = torch.from_numpy(img_label).long()
+            return (tensor_input, self.keep_axials), tensor_label - 1
+
+        while True:
+            if 0 < sum(self.scale_factors):
+                item_crop_size = [
+                    randrange(
+                        min(
+                            img_input.shape[i],
+                            round(crop_size[i] *
+                                  (1. - self.scale_factors[i]))
+                        ),
+                        min(
+                            img_input.shape[i] + 1,
+                            int(crop_size[i] *
+                                (1. + self.scale_factors[i])) + 1
+                        )
+                    ) for i in range(self.n_dims)
+                ]
+            else:
+                item_crop_size = crop_size
+
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
+                # rotate image
+                theta = randint(-self.rotation_angle, self.rotation_angle)
+                cos_theta = math.cos(math.radians(theta))
+                sin_theta = math.sin(math.radians(theta))
+                for i in (-2, -1):
+                    item_crop_size[i] *= (abs(cos_theta) + abs(sin_theta))
+                    item_crop_size[i] = math.ceil(item_crop_size[i])
+                item_crop_size = [
+                    min(img_input.shape[i], item_crop_size[i])
+                    for i in range(self.n_dims)
+                ]
+
+            if isinstance(self, SegmentationDatasetZarr):
+                if not self.is_ae:
+                    za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+                    index_pool = za_label_a.attrs.get(
+                        f'label.indices.{self.i_frame}')
+                    if index_pool is None:
+                        index_pool = np.argwhere(0 < img_label)
+                        za_label_a.attrs[
+                            f'label.indices.{self.i_frame}'
+                        ] = tuple(map(tuple, index_pool.tolist()))
+            else:
+                index_pool = np.argwhere(0 < img_label)
+            if self.is_ae:
+                origins = [
+                    randint(0, img_input.shape[i] - item_crop_size[i])
+                    for i in range(self.n_dims)
+                ]
+            else:
+                base_index = index_pool[randrange(len(index_pool))]
+                origins = [
+                    randint(
+                        max(0,
+                            (int(base_index[i] * self.resize_factor[i]) -
+                             (item_crop_size[i] - 1))),
+                        min((img_input.shape[i] - item_crop_size[i]),
+                            int(base_index[i] * self.resize_factor[i]))
+                    )
+                    for i in range(self.n_dims)
+                ]
+            slices = tuple(
+                slice(origins[i], origins[i] + item_crop_size[i])
+                for i in range(self.n_dims)
+            )
+            if not self.is_ae:
+                sliced_label = img_label[slices].copy()
+            sliced_input = img_input[slices].copy()
+
+            if not self.is_ae and 0 < self.contrast:
+                fg_index = np.isin(sliced_label, (2, 3, 5, 6))
+                bg_index = np.isin(sliced_label, (1, 4))
+                if fg_index.any() and bg_index.any():
+                    fg_mean = sliced_input[fg_index].mean()
+                    bg_mean = sliced_input[bg_index].mean()
+                    cr_factor = (
+                        ((fg_mean - bg_mean) * uniform(self.contrast, 1)
+                         + bg_mean)
+                        / fg_mean
+                    )
+                    sliced_input[fg_index] *= cr_factor
+
+            if self.rotation_angle is not None and 0 < self.rotation_angle:
+                if self.n_dims == 3:
+                    sliced_input = np.array([
+                        rotate(
+                            sliced_input[z],
+                            theta,
+                            resize=True,
+                            preserve_range=True,
+                            order=1,  # 1: Bi-linear (default)
+                        ) for z in range(sliced_input.shape[0])
+                    ])
+                else:
+                    sliced_input = rotate(sliced_input,
+                                          theta,
+                                          resize=True,
+                                          preserve_range=True,
+                                          order=1,  # 1: Bi-linear (default)
+                                          )
+                h_crop, w_crop = crop_size[-2:]
+                h_rotate, w_rotate = sliced_input.shape[-2:]
+                r_origin = max(0, (h_rotate - h_crop) // 2)
+                c_origin = max(0, (w_rotate - w_crop) // 2)
+                sliced_input = sliced_input[...,
+                                            r_origin:r_origin+h_crop,
+                                            c_origin:c_origin+w_crop]
+
+                # rotate label
+                if not self.is_ae:
+                    if self.n_dims == 3:
+                        sliced_label = np.array([
+                            rotate(
+                                sliced_label[z],
+                                theta,
+                                resize=True,
+                                preserve_range=True,
+                                order=0,  # 0: Nearest-neighbor
+                            ) for z in range(sliced_label.shape[0])
+                        ])
+                    else:
+                        sliced_label = rotate(sliced_label,
+                                              theta,
+                                              resize=True,
+                                              preserve_range=True,
+                                              order=0,  # 0: Nearest-neighbor
+                                              )
+                    sliced_label = sliced_label[...,
+                                                r_origin:r_origin+h_crop,
+                                                c_origin:c_origin+w_crop]
+                    if sliced_label.max() == 0:
+                        continue
+            break
+
+        tensor_input = torch.from_numpy(sliced_input)[None]
+        if not self.is_ae:
+            tensor_label = torch.from_numpy(sliced_label)
+        if tensor_input.shape[1:] != crop_size:
+            interpolate_mode = 'trilinear' if self.n_dims == 3 else 'bilinear'
+            tensor_input = F.interpolate(tensor_input[None],
+                                         crop_size,
+                                         mode=interpolate_mode,
+                                         align_corners=True)[0]
+            if not self.is_ae:
+                tensor_label = F.interpolate(
+                    tensor_label[None, None].float(),
+                    crop_size,
+                    mode='nearest'
+                )[0, 0]
+        if self.is_ae:
+            return (tensor_input, self.keep_axials), tensor_input
+        tensor_label = tensor_label.long()
+        flip_dims = [-(1 + i)
+                     for i, v in enumerate(torch.rand(self.n_dims)) if v < 0.5]
+        tensor_input = torch.flip(tensor_input, flip_dims)
+        tensor_label = torch.flip(tensor_label, flip_dims)
+        # -1: unlabeled, 0: BG (LW), 1: Outer (LW), 2: Inner (LW)
+        #                3: BG (HW), 4: Outer (HW), 5: Inner (HW)
+        return (tensor_input, self.keep_axials), tensor_label - 1
+
+
+class SegmentationDatasetZarr(SegmentationDatasetBase):
     def __init__(self, zpath_input, zpath_seg_label, indices, img_size,
                  crop_size, n_crops, keep_axials=(True,) * 4, scales=None,
                  is_livemode=False, scale_factor_base=0.2, is_ae=False,
@@ -246,31 +451,22 @@ class SegmentationDatasetZarr(du.Dataset):
                 'img_size: {} and crop_size: {} should have the same length'
                 .format(img_size, crop_size)
             )
-        if scale_factor_base < 0 or 1 <= scale_factor_base:
-            raise ValueError(
-                'scale_factor_base should be 0 <= scale_factor_base < 1'
-            )
-        self.n_dims = len(crop_size)
-        if scales is None:
-            scales = (1.,) * self.n_dims
-        scale_factors = tuple(
-            scale_factor_base * min(scales) / scales[i]
-            for i in range(self.n_dims)
-        )
+        super().__init__(crop_size, keep_axials, scales, scale_factor_base,
+                         rotation_angle, contrast, is_eval)
+
         self.za_input = zarr.open(zpath_input, mode='r')
         crop_size = tuple(
             min(crop_size[i], img_size[i]) for i in range(self.n_dims))
         self.img_size = tuple(img_size)
         self.crop_size = crop_size
-        self.scale_factors = scale_factors
         self.rand_crop_ranges = [(
             min(
                 img_size[i],
-                round(crop_size[i] * (1. - scale_factors[i]))
+                round(crop_size[i] * (1. - self.scale_factors[i]))
             ),
             min(
                 img_size[i] + 1,
-                int(crop_size[i] * (1. + scale_factors[i])) + 1
+                int(crop_size[i] * (1. + self.scale_factors[i])) + 1
             )
         ) for i in range(self.n_dims)]
         self.n_crops = n_crops
@@ -292,13 +488,10 @@ class SegmentationDatasetZarr(du.Dataset):
             if (adaptive_length and (length is not None) and
                     (len(indices) * self.n_crops <= length)):
                 length = None
-        self.rotation_angle = rotation_angle
-        self.contrast = contrast
         if self.is_livemode:
             self.length = int(redis_client.get(REDIS_KEY_NCROPS))
         else:
             self.length = length
-        self.keep_axials = torch.tensor(keep_axials)
         if cache_maxbytes:
             self.use_cache = True
             self.cache_dict_input = LRUCacheDict(cache_maxbytes // 2)
@@ -418,169 +611,74 @@ class SegmentationDatasetZarr(du.Dataset):
                 img_label = self._get_label_at(i_frame, self.img_size)
         img_input = get_input_at(self.za_input, i_frame, self.cache_dict_input,
                                  self.memmap_dir, img_size=self.img_size)
+        self.i_frame = i_frame
         if self.za_input.shape[1:] != self.img_size:
-            resize_factor = [self.img_size[d] / self.za_input.shape[1+d]
-                             for d in range(img_input.ndim)]
+            self.resize_factor = [self.img_size[d] / self.za_input.shape[1+d]
+                                  for d in range(img_input.ndim)]
         else:
-            resize_factor = [1, ] * img_input.ndim
-        if self.is_eval:
-            tensor_input = torch.from_numpy(img_input[None])
-            tensor_label = torch.from_numpy(img_label).long()
-            return (tensor_input, self.keep_axials), tensor_label - 1
+            self.resize_factor = [1, ] * img_input.ndim
 
-        while True:
-            if 0 < sum(self.scale_factors):
-                item_crop_size = [
-                    randrange(
-                        min(
-                            img_input.shape[i],
-                            round(self.crop_size[i] *
-                                  (1. - self.scale_factors[i]))
-                        ),
-                        min(
-                            img_input.shape[i] + 1,
-                            int(self.crop_size[i] *
-                                (1. + self.scale_factors[i])) + 1
-                        )
-                    ) for i in range(self.n_dims)
-                ]
-            else:
-                item_crop_size = self.crop_size
-            if self.rotation_angle is not None and 0 < self.rotation_angle:
-                # rotate image
-                theta = randint(-self.rotation_angle, self.rotation_angle)
-                cos_theta = math.cos(math.radians(theta))
-                sin_theta = math.sin(math.radians(theta))
-                for i in (-2, -1):
-                    item_crop_size[i] *= (abs(cos_theta) + abs(sin_theta))
-                    item_crop_size[i] = math.ceil(item_crop_size[i])
-                item_crop_size = [min(img_input.shape[i], item_crop_size[i])
-                                  for i in range(self.n_dims)]
-            if not self.is_ae:
-                za_label_a = zarr.open(self.zpath_seg_label, mode='a')
-                index_pool = za_label_a.attrs.get(
-                    f'label.indices.{i_frame}')
-                if index_pool is None:
-                    index_pool = np.argwhere(0 < img_label)
-                    za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
-                        map(tuple, index_pool.tolist())
-                    )
-            if self.is_ae:
-                origins = [
-                    randint(0, img_input.shape[i] - item_crop_size[i])
-                    for i in range(self.n_dims)
-                ]
-            else:
-                base_index = index_pool[randrange(len(index_pool))]
-                origins = [
-                    randint(
-                        max(0,
-                            (int(base_index[i] * resize_factor[i]) -
-                             (item_crop_size[i] - 1))),
-                        min((img_input.shape[i] - item_crop_size[i]),
-                            int(base_index[i] * resize_factor[i]))
-                    )
-                    for i in range(self.n_dims)
-                ]
-            slices = tuple(
-                slice(origins[i], origins[i] + item_crop_size[i])
-                for i in range(self.n_dims)
+        return super()._generate_item(img_input, img_label, self.crop_size)
+
+
+class SegmentationDatasetNumpy(SegmentationDatasetBase):
+    def __init__(self, images, labels, crop_size=(96, 96),
+                 keep_axials=(True,) * 4, scales=None, scale_factor_base=0,
+                 rotation_angle=None, contrast=0.5, is_eval=False):
+        """Generate dataset for segmentation.
+
+        Args:
+            images(list of ndarray): input images.
+            labels(list of ndarray): label images corresponding to input images.
+            crop_size(array-like of length ndim): crop size to generate dataset.
+            keep_axials(array-like of length 4): this value is used to calculate
+                how many times down/up sampling are performed in z direction.
+                Ignored for 2D data.
+            scales(array-like of length ndim): a list of pixel/voxel size in
+                physical unit (e.g. 0.5 μm/px). This is used to calculate scale
+                factors for augmentation.
+            scale_factor_base(float): a base scale factor for augmentation.
+            rotation_angle(float): rotation angle for augmentation in degree.
+            contrast(float): contrast factor for augmentation.
+            is_eval(boolean): True if the dataset is for evaluation, where no
+                augmentation is performed.
+        """
+        if len(images) != len(labels):
+            raise ValueError(
+                'len(images): {} and len(labels): {} should be the same'
+                .format(len(images), len(labels))
             )
-            if not self.is_ae:
-                sliced_label = img_label[slices].copy()
+        for img, lbl in zip(images, labels):
+            if img.shape != lbl.shape:
+                raise ValueError(
+                    'img.shape: {} and lbl.shape: {} should be the same'
+                    .format(img.shape, lbl.shape)
+                )
+        super().__init__(crop_size, keep_axials, scales, scale_factor_base,
+                         rotation_angle, contrast, is_eval)
+        self.resize_factor = self.resize_factor = [1, ] * self.n_dims
+        self.is_ae = False
+        self.images = images
+        self.labels = labels
 
-            sliced_input = img_input[slices].copy()
+    def __len__(self):
+        return len(self.images)
 
-            if not self.is_ae and 0 < self.contrast:
-                fg_index = np.isin(sliced_label, (2, 3, 5, 6))
-                bg_index = np.isin(sliced_label, (1, 4))
-                if fg_index.any() and bg_index.any():
-                    fg_mean = sliced_input[fg_index].mean()
-                    bg_mean = sliced_input[bg_index].mean()
-                    cr_factor = (
-                        ((fg_mean - bg_mean) * uniform(self.contrast, 1)
-                         + bg_mean)
-                        / fg_mean
-                    )
-                    sliced_input[fg_index] *= cr_factor
+    def __getitem__(self, index):
+        """
+        Input shape: ((D,) H, W)
+        Label shape: ((D,) H, W)
+        Label values: 0: unlabeled, 1: BG (LW), 2: Outer (LW), 3: Inner (LW)
+                                    4: BG (HW), 5: Outer (HW), 6: Inner (HW)
+        """
+        img_input = self.images[index]
+        img_label = self.labels[index]
+        crop_size = tuple(
+            min(self.crop_size[i], img_input.shape[i])
+            for i in range(self.n_dims)
+        )
 
-            if self.rotation_angle is not None and 0 < self.rotation_angle:
-                if self.n_dims == 3:
-                    sliced_input = np.array([
-                        rotate(
-                            sliced_input[z],
-                            theta,
-                            resize=True,
-                            preserve_range=True,
-                            order=1,  # 1: Bi-linear (default)
-                        ) for z in range(sliced_input.shape[0])
-                    ])
-                else:
-                    sliced_input = rotate(sliced_input,
-                                          theta,
-                                          resize=True,
-                                          preserve_range=True,
-                                          order=1,  # 1: Bi-linear (default)
-                                          )
-                h_crop, w_crop = self.crop_size[-2:]
-                h_rotate, w_rotate = sliced_input.shape[-2:]
-                r_origin = max(0, (h_rotate - h_crop) // 2)
-                c_origin = max(0, (w_rotate - w_crop) // 2)
-                sliced_input = sliced_input[...,
-                                            r_origin:r_origin+h_crop,
-                                            c_origin:c_origin+w_crop]
-
-                # rotate label
-                if not self.is_ae:
-                    if self.n_dims == 3:
-                        sliced_label = np.array([
-                            rotate(
-                                sliced_label[z],
-                                theta,
-                                resize=True,
-                                preserve_range=True,
-                                order=0,  # 0: Nearest-neighbor
-                            ) for z in range(sliced_label.shape[0])
-                        ])
-                    else:
-                        sliced_label = rotate(sliced_label,
-                                              theta,
-                                              resize=True,
-                                              preserve_range=True,
-                                              order=0,  # 0: Nearest-neighbor
-                                              )
-                    sliced_label = sliced_label[...,
-                                                r_origin:r_origin+h_crop,
-                                                c_origin:c_origin+w_crop]
-                    if sliced_label.max() == 0:
-                        continue
-            break
-
-        tensor_input = torch.from_numpy(sliced_input)[None]
-        if not self.is_ae:
-            tensor_label = torch.from_numpy(sliced_label)
-        if tensor_input.shape[1:] != self.crop_size:
-            interpolate_mode = 'trilinear' if self.n_dims == 3 else 'bilinear'
-            tensor_input = F.interpolate(tensor_input[None],
-                                         self.crop_size,
-                                         mode=interpolate_mode,
-                                         align_corners=True)[0]
-            if not self.is_ae:
-                tensor_label = F.interpolate(
-                    tensor_label[None, None].float(),
-                    self.crop_size,
-                    mode='nearest'
-                )[0, 0]
-        if self.is_ae:
-            return (tensor_input, self.keep_axials), tensor_input
-        tensor_label = tensor_label.long()
-        flip_dims = [-(1 + i)
-                     for i, v in enumerate(torch.rand(self.n_dims)) if v < 0.5]
-        tensor_input = torch.flip(tensor_input, flip_dims)
-        tensor_label = torch.flip(tensor_label, flip_dims)
-        # -1: unlabeled, 0: BG (LW), 1: Outer (LW), 2: Inner (LW)
-        #                3: BG (HW), 4: Outer (HW), 5: Inner (HW)
-        return (tensor_input, self.keep_axials), tensor_label - 1
+        return super()._generate_item(img_input, img_label, crop_size)
 
 
 class AutoencoderDatasetZarr(SegmentationDatasetZarr):

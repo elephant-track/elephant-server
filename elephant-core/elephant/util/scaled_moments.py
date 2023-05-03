@@ -144,3 +144,27 @@ def scaled_centroid(image, scales=None):
               # for each axis
               / M[(0,) * image.ndim])  # weighted sum of all points
     return center
+
+
+def radii_and_rotation(moments_central, is_3d=False):
+    if is_3d:
+        n_dims = 3
+        idx = ((2, 1, 1, 1, 0, 0, 1, 0, 0),
+               (0, 1, 0, 1, 2, 1, 0, 1, 0),
+               (0, 0, 1, 0, 0, 1, 1, 1, 2))
+    else:
+        n_dims = 2
+        idx = ((2, 1, 1, 0),
+               (0, 1, 1, 2))
+    cov = moments_central[idx].reshape((n_dims, n_dims))
+    if not cov.any():  # if all zeros
+        raise RuntimeError('covariance is all zeros')
+    cov /= moments_central[(0,) * n_dims]
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    if ((eigvals < 0).any() or
+        np.iscomplex(eigvals).any() or
+            np.iscomplex(eigvecs).any()):
+        raise RuntimeError('invalid eigen values/vectors')
+    radii = np.sqrt(eigvals)
+    rotation = eigvecs
+    return radii, rotation

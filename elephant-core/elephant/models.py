@@ -248,6 +248,50 @@ class UNet(nn.Module):
         return model
 
 
+class ResUNet(UNet):
+    def _res_block(self, in_channels, out_channels,
+                   activation=nn.LeakyReLU(0.1)):
+        return ResBlock(in_channels, out_channels, activation=activation,
+                        is_3d=self.is_3d)
+
+    def _encoder_block(self, in_channels, out_channels):
+        return self._res_block(in_channels, out_channels)
+
+    @ classmethod
+    def three_class_segmentation(cls, is_eval=False, device=None,
+                                 state_dict=None, is_decoder_only=False,
+                                 is_pad=False, is_3d=True):
+        return super().three_class_segmentation(is_eval,
+                                                device,
+                                                state_dict,
+                                                is_decoder_only,
+                                                is_pad,
+                                                is_3d)
+
+
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1,
+                 activation=nn.ReLU(), is_3d=True):
+        super().__init__()
+        n_groups = min(32, out_channels)
+        self.conv = nn.Conv3d if is_3d else nn.Conv2d
+        self.res = self.conv(in_channels, out_channels,
+                             kernel_size=1, bias=False, stride=stride)
+        self.conv1 = self.conv(in_channels, out_channels,
+                               kernel_size=3, padding=1, stride=stride)
+        self.relu = nn.ReLU()
+        self.norm1 = nn.GroupNorm(n_groups, out_channels)
+        self.conv2 = self.conv(out_channels, out_channels,
+                               kernel_size=3, padding=1)
+        self.activation = activation
+        self.norm2 = nn.GroupNorm(n_groups, out_channels)
+
+    def forward(self, x):
+        return self.norm2(self.activation(
+            (self.res(x) + self.conv2(self.norm1(self.relu(self.conv1(x)))))
+        ))
+
+
 class ResBlockFlow(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1,
                  activation=nn.LeakyReLU(0.1), is_3d=True):

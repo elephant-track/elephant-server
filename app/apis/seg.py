@@ -61,6 +61,7 @@ from elephant.util import get_device
 from elephant.util import to_fancy_index
 from elephant.util.ellipse import ellipse
 from elephant.util.ellipsoid import ellipsoid
+from elephant.util import dilate
 
 api = Namespace('seg', description='Seg APIs')
 
@@ -128,53 +129,6 @@ def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                         tuple(input_size))
 
 
-def _dilate_2d_indices(rr, cc, shape):
-    if len(rr) != len(cc):
-        raise RuntimeError('indices should have the same length')
-    n_pixels = len(rr)
-    rr_dilate = np.array([0, ] * (n_pixels * 3 ** 2))
-    cc_dilate = np.copy(rr_dilate)
-    offset = 0
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
-            rr_dilate[
-                offset:offset + n_pixels
-            ] = (rr + dy).clip(0, shape[0] - 1)
-            cc_dilate[
-                offset:offset + n_pixels
-            ] = (cc + dx).clip(0, shape[1] - 1)
-            offset += n_pixels
-    unique_dilate = np.unique(
-        np.stack((rr_dilate, cc_dilate)), axis=1)
-    return unique_dilate[0], unique_dilate[1]
-
-
-def _dilate_3d_indices(dd, rr, cc, shape):
-    if len(dd) != len(rr) or len(dd) != len(cc):
-        raise RuntimeError('indices should have the same length')
-    n_pixels = len(dd)
-    dd_dilate = np.array([0, ] * (n_pixels * 3 ** 3))
-    rr_dilate = np.copy(dd_dilate)
-    cc_dilate = np.copy(dd_dilate)
-    offset = 0
-    for dz in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                dd_dilate[
-                    offset:offset + n_pixels
-                ] = (dd + dz).clip(0, shape[0] - 1)
-                rr_dilate[
-                    offset:offset + n_pixels
-                ] = (rr + dy).clip(0, shape[1] - 1)
-                cc_dilate[
-                    offset:offset + n_pixels
-                ] = (cc + dx).clip(0, shape[2] - 1)
-                offset += n_pixels
-    unique_dilate = np.unique(
-        np.stack((dd_dilate, rr_dilate, cc_dilate)), axis=1)
-    return unique_dilate[0], unique_dilate[1], unique_dilate[2]
-
-
 def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                        zpath_seg_label_vis, auto_bg_thresh=0, c_ratio=0.5,
                        is_livemode=False, memmap_dir=None):
@@ -225,10 +179,10 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             radii = np.sqrt(radii)
             if n_dims == 3:
                 draw_func = ellipsoid
-                dilate_func = _dilate_3d_indices
+                dilate_func = dilate.dilate_3d_indices
             else:
                 draw_func = ellipse
-                dilate_func = _dilate_2d_indices
+                dilate_func = dilate.dilate_2d_indices
             indices_outer = draw_func(
                 centroid,
                 radii,

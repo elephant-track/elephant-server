@@ -33,6 +33,8 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 
 RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
+RABBITMQ_NODE_PORT = int(os.environ.get("RABBITMQ_NODE_PORT", 5672))
+
 
 class RabbitMQHandler(logging.StreamHandler):
     """
@@ -68,7 +70,7 @@ def logger():
 def publish_mq(queue, body):
     if RUN_ON_FLASK:
         with pika.BlockingConnection(pika.ConnectionParameters(
-                host='localhost', heartbeat=0)) as connection:
+                host='localhost', port=RABBITMQ_NODE_PORT, heartbeat=0)) as connection:
             connection.channel().queue_declare(queue=queue)
             connection.channel().basic_publish(exchange='',
                                                routing_key=queue,

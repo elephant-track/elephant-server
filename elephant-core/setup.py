@@ -52,5 +52,15 @@ setuptools.setup(
     name='elephant',
     version=get_version('elephant/version.py'),
     packages=find_packages(),
-    python_requires='>=3.6',
+    python_requires='>=3.8,<4.0',
+    install_requires=[
+        "torch>=2.0.1,<3.0",
+        "torchvision>=0.15.2,<1.0",
+        "tqdm>=4.65.0,<5.0",
+        "h5py>=3.8.0,<4.0",
+        "zarr>=2.14.2,<3.0",
+        "pika>=1.3.2,<2.0",
+        "redis>=4.5.5,<5.0",
+        "scikit-image>=0.21.0,<1.0",
+    ]
 )

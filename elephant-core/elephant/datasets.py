@@ -624,7 +624,7 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
 class SegmentationDatasetNumpy(SegmentationDatasetBase):
     def __init__(self, images, labels, crop_size=(96, 96),
                  keep_axials=(True,) * 4, scales=None, scale_factor_base=0,
-                 rotation_angle=None, contrast=0.5, is_eval=False):
+                 rotation_angle=None, contrast=0.5, is_eval=False, n_crops=1):
         """Generate dataset for segmentation.
 
         Args:
@@ -642,6 +642,7 @@ class SegmentationDatasetNumpy(SegmentationDatasetBase):
             contrast(float): contrast factor for augmentation.
             is_eval(boolean): True if the dataset is for evaluation, where no
                 augmentation is performed.
+            n_crops(int): number of crops per timepoint.
         """
         if len(images) != len(labels):
             raise ValueError(
@@ -660,9 +661,10 @@ class SegmentationDatasetNumpy(SegmentationDatasetBase):
         self.is_ae = False
         self.images = images
         self.labels = labels
+        self.n_crops = n_crops
 
     def __len__(self):
-        return len(self.images)
+        return len(self.images) * self.n_crops
 
     def __getitem__(self, index):
         """
@@ -671,8 +673,8 @@ class SegmentationDatasetNumpy(SegmentationDatasetBase):
         Label values: 0: unlabeled, 1: BG (LW), 2: Outer (LW), 3: Inner (LW)
                                     4: BG (HW), 5: Outer (HW), 6: Inner (HW)
         """
-        img_input = self.images[index]
-        img_label = self.labels[index]
+        img_input = self.images[index // self.n_crops]
+        img_label = self.labels[index // self.n_crops]
         crop_size = tuple(
             min(self.crop_size[i], img_input.shape[i])
             for i in range(self.n_dims)

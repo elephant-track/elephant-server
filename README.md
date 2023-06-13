@@ -24,7 +24,7 @@
     </tr>
     <tr>
       <td>Publication</td>
-      <td><a href="https://www.biorxiv.org/content">bioRxiv</a></td>
+      <td>Sugawara, K., Çevrim, C. & Averof, M. <a href="https://doi.org/10.7554/eLife.69380"><i>Tracking cell lineages in 3D by incremental deep learning.</i></a> eLife 2022. doi:10.7554/eLife.69380</td>
     </tr>
   </tbody>
 </table>
@@ -77,22 +77,19 @@ The detailed instructions for each option can be found in [the documentation](ht
   
 ## Citation
 
-Please cite our paper on [bioRxiv](https://biorxiv.org/cgi/content/short/2021.02.26.432552v1).
+Please cite our paper on [eLife](https://doi.org/10.7554/eLife.69380).
 
-- Sugawara, K., Cevrim, C. & Averof, M. [*Tracking cell lineages in 3D by incremental deep learning.*](https://biorxiv.org/cgi/content/short/2021.02.26.432552v1) bioRxiv 2021. doi:10.1101/2021.02.26.432552
+- Sugawara, K., Çevrim, C. & Averof, M. [*Tracking cell lineages in 3D by incremental deep learning.*](https://doi.org/10.7554/eLife.69380) eLife 2022. doi:10.7554/eLife.69380
 
 ```.bib
-@article {Sugawara2021.02.26.432552,
-	author = {Sugawara, Ko and Cevrim, Cagri and Averof, Michalis},
+@article {Sugawara2022,
+	author = {Sugawara, Ko and {\c{C}}evrim, {\c{C}}a?r? and Averof, Michalis},
 	title = {Tracking cell lineages in 3D by incremental deep learning},
-	elocation-id = {2021.02.26.432552},
-	year = {2021},
-	doi = {10.1101/2021.02.26.432552},
-	publisher = {Cold Spring Harbor Laboratory},
-	abstract = {Deep learning is emerging as a powerful approach for bioimage analysis, but its wider use is limited by the scarcity of annotated data for training. We present ELEPHANT, an interactive platform for cell tracking in 4D that seamlessly integrates annotation, deep learning, and proofreading. ELEPHANT{\textquoteright}s user interface supports cycles of incremental learning starting from sparse annotations, yielding accurate, user-validated cell lineages with a modest investment in time and effort.Competing Interest StatementKS is employed part-time by LPIXEL Inc.},
-	URL = {https://www.biorxiv.org/content/early/2021/02/26/2021.02.26.432552},
-	eprint = {https://www.biorxiv.org/content/early/2021/02/26/2021.02.26.432552.full.pdf},
-	journal = {bioRxiv}
+	year = {2022},
+	doi = {10.7554/eLife.69380},
+	abstract = {Deep learning is emerging as a powerful approach for bioimage analysis. Its use in cell tracking is limited by the scarcity of annotated data for the training of deep-learning models. Moreover, annotation, training, prediction, and proofreading currently lack a unified user interface. We present ELEPHANT, an interactive platform for 3D cell tracking that addresses these challenges by taking an incremental approach to deep learning. ELEPHANT provides an interface that seamlessly integrates cell track annotation, deep learning, prediction, and proofreading. This enables users to implement cycles of incremental learning starting from a few annotated nuclei. Successive prediction-validation cycles enrich the training data, leading to rapid improvements in tracking performance. We test the software's performance against state-of-the-art methods and track lineages spanning the entire course of leg regeneration in a crustacean over 1 week (504 time-points). ELEPHANT yields accurate, fully-validated cell lineages with a modest investment in time and effort.},
+	URL = {https://doi.org/10.7554/eLife.69380},
+	journal = {eLife}
 }
 ```
 

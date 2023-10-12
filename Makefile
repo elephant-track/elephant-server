@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot notebook warmup test singularity-build singularity-launch singularity-stop
+.PHONY: help rebuild build launch bash bashroot notebook warmup test singularity-build singularity-init singularity-launch singularity-stop
 
 help:
 	@cat Makefile
@@ -62,6 +62,8 @@ test:
 
 singularity-build:
 	singularity build --fakeroot elephant.sif elephant.def
+
+singularity-init:
 	singularity run --fakeroot elephant.sif
 
 singularity-launch:

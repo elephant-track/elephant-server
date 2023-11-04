@@ -9,15 +9,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.7
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.7
     - name: Install mamba
       run: |
-        $CONDA/bin/conda install --name base conda=4.11.0
-        $CONDA/bin/conda install --name base mamba=0.19.1
+        $CONDA/bin/conda install --name base python=3.7  
+        $CONDA/bin/conda install --name base conda=4.11.0 mamba=0.19.1
     - name: Install dependencies
       run: |
         $CONDA/bin/conda env update --file environment.yml --name base

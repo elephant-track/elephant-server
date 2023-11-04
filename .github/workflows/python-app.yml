@@ -14,11 +14,10 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.7
-    - name: Install libmamba
+    - name: Install mamba
       run: |
-        $CONDA/bin/conda update --name base conda
-        $CONDA/bin/conda install -n base conda-libmamba-solver
-        $CONDA/bin/conda config --set solver libmamba
+        $CONDA/bin/conda update --name base conda=4.11.0
+        $CONDA/bin/conda install -name base mamba=0.19.1
     - name: Install dependencies
       run: |
         $CONDA/bin/conda env update --file environment.yml --name base

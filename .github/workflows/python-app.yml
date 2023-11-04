@@ -14,7 +14,7 @@ jobs:
       uses: conda-incubator/setup-miniconda@v2
       with:
         environment-file: environment.yml
-        activate-environment: true
+        activate-environment: base
         python-version: 3.7
     - name: Install dependencies
       run: |

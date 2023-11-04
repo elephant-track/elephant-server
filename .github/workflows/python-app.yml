@@ -17,7 +17,7 @@ jobs:
         python-version: 3.7
     - name: Install dependencies
       run: |
-        conda install --name base conda=4.11.0=py37h89c1867_0 mamba=0.19.1=py37h6dacc13_0
+        conda install -c conda-forge --name base conda=4.11.0=py37h89c1867_0 mamba=0.19.1=py37h6dacc13_0
         conda env update --file environment.yml --name base
         pip install --upgrade pip
         pip install flake8 pytest

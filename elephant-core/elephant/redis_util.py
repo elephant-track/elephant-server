@@ -25,6 +25,7 @@
 """Utils used for Redis."""
 
 from enum import Enum
+import os
 
 import redis
 
@@ -36,6 +37,8 @@ REDIS_KEY_STATE = 'state'
 REDIS_KEY_TIMEPOINT = 'timepoint'
 REDIS_KEY_UPDATE_ONGOING_SEG = 'update_ongoing_seg'
 REDIS_KEY_UPDATE_ONGOING_FLOW = 'update_ongoing_flow'
+REDIS_HOST = os.environ.get('ELEPHANT_REDIS_HOST', 'localhost')
+REDIS_PORT = os.environ.get('ELEPHANT_REDIS_PORT', '6379')
 
 
 class TrainState(Enum):
@@ -45,7 +48,8 @@ class TrainState(Enum):
 
 
 if RUN_ON_FLASK:
-    redis_client = redis.Redis.from_url('redis://localhost:6379/0')
+    redis_client = redis.Redis.from_url(f'redis://{REDIS_HOST}:{REDIS_PORT}/0')
+    redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
 else:
     redis_client = None
 

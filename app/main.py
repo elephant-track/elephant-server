@@ -23,6 +23,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
 """Flask endpoints."""
+import os
+
 from celery import Celery
 from flask import Flask
 from flask import request
@@ -31,7 +33,9 @@ from flask_redis import FlaskRedis
 from apis import init_api
 from elephant.logging import logger
 from elephant.redis_util import TrainState
+from elephant.redis_util import REDIS_HOST
 from elephant.redis_util import REDIS_KEY_STATE
+from elephant.redis_util import REDIS_PORT
 
 
 def make_celery(app):
@@ -53,15 +57,13 @@ def make_celery(app):
 
 app = Flask(__name__)
 app.config.update(
-    broker_url='redis://localhost:6379',
-    result_backend='redis://localhost:6379',
+    broker_url=f'redis://{REDIS_HOST}:{REDIS_PORT}',
+    result_backend=f'redis://{REDIS_HOST}:{REDIS_PORT}',
     worker_redirect_stdouts=False,
     worker_prefetch_multiplier=1,
 )
 
 celery = make_celery(app)
-redis_client = FlaskRedis(app)
-redis_client.set(REDIS_KEY_STATE, TrainState.IDLE.value)
 
 
 init_api(app)

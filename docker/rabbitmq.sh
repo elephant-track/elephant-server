@@ -12,4 +12,4 @@ echo "*** Log in the WebUI at port 5672 (example: http:/localhost:5672) ***") &
 # $@ is used to pass arguments to the rabbitmq-server command.
 # For example if you use it like this: docker run -d rabbitmq arg1 arg2,
 # it will be as you run in the container rabbitmq-server arg1 arg2 
-rabbitmq-server $@
+/etc/init.d/rabbitmq-server $@

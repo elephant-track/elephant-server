@@ -9,24 +9,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install mamba
-      run: |
-        $CONDA/bin/conda install --name base python=3.7  
-        $CONDA/bin/conda install --name base conda=4.11.0 mamba=0.19.1
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+        auto-update-conda: true
+        activate-environment: ""
+        python-version: 3.7
     - name: Install dependencies
       run: |
-        $CONDA/bin/conda env update --file environment.yml --name base
-        $CONDA/bin/pip install --upgrade pip
-        $CONDA/bin/pip install flake8 pytest
+        conda env update --file environment.yml --name base
+        pip install --upgrade pip
+        pip install flake8 pytest
     - name: Install package
       run: |
-        $CONDA/bin/pip install ./elephant-core
+        pip install ./elephant-core
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        $CONDA/bin/flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        $CONDA/bin/flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        $CONDA/bin/pytest
+        pytest

@@ -13,9 +13,9 @@ jobs:
     - name: Install Conda
       run: |
         wget https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh
-        bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp /usr/local
+        bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp ./miniconda
         rm Miniconda3-py37_4.11.0-Linux-x86_64.sh
-        source /usr/local/etc/profile.d/conda.sh
+        source ./miniconda/etc/profile.d/conda.sh
         conda init
         conda install -c conda-forge -y mamba
         mamba clean -qafy

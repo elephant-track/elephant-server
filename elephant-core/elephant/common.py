@@ -329,10 +329,11 @@ def run_train(rank_or_device, world_size, models, loader, optimizers, loss_fn,
                 for batch_id, ((x, keep_axials), y) in enumerate(loader):
                     if is_ddp:
                         dist.barrier()
-                    if (torch.eq(x, torch.tensor(-200.)).any() and
-                            torch.eq(y, torch.tensor(-200)).any()):
-                        is_ncrops_updated = True
-                        break
+                    if is_livemode:
+                        if (torch.eq(x, torch.tensor(-200.)).any() and
+                                torch.eq(y, torch.tensor(-200)).any()):
+                            is_ncrops_updated = True
+                            break
                     if redis_client is not None:
                         while (get_state() == TrainState.WAIT.value):
                             if is_logging:

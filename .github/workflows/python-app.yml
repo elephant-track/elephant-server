@@ -9,25 +9,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.7
-      uses: actions/setup-python@v2
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v3
+      id: cache
       with:
-        python-version: 3.7
+        path: ~/miniconda
+        key: ubuntu-conda-${{ hashFiles('environment.yml') }}
+    - name: Install Conda
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        wget https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh
+        bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp ~/miniconda
+        rm Miniconda3-py37_4.11.0-Linux-x86_64.sh
+        source ~/miniconda/etc/profile.d/conda.sh
+        conda init
+        conda install -c conda-forge -y mamba
+        mamba clean -qafy
+        mamba env update -f environment.yml
     - name: Install dependencies
       run: |
-        $CONDA/bin/conda env update --file environment.yml --name base
-        $CONDA/bin/pip install --upgrade pip
-        $CONDA/bin/pip install flake8 pytest
+        ~/miniconda/bin/python -m pip install --upgrade pip
+        ~/miniconda/bin/python -m pip install flake8 pytest
     - name: Install package
       run: |
-        $CONDA/bin/pip install ./elephant-core
+        ~/miniconda/bin/python -m pip install ./elephant-core
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        $CONDA/bin/flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        ~/miniconda/bin/flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        $CONDA/bin/flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        ~/miniconda/bin/flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        $CONDA/bin/pytest
+        ~/miniconda/bin/pytest

@@ -280,7 +280,7 @@ class SegmentationDatasetBase(du.Dataset):
                     for i in range(self.n_dims)
                 ]
 
-            if isinstance(self, SegmentationDatasetZarr):
+            if RUN_ON_FLASK and isinstance(self, SegmentationDatasetZarr):
                 if not self.is_ae:
                     za_label_a = zarr.open(self.zpath_seg_label, mode='a')
                     index_pool = za_label_a.attrs.get(
@@ -556,10 +556,11 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            za_label_a = zarr.open(self.zpath_seg_label, mode='a')
-            if za_label_a.attrs.get('updated', False):
-                self.cache_dict_label.clear()
-                za_label_a.attrs['updated'] = False
+            if RUN_ON_FLASK:
+                za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+                if za_label_a.attrs.get('updated', False):
+                    self.cache_dict_label.clear()
+                    za_label_a.attrs['updated'] = False
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))

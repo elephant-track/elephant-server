@@ -154,18 +154,20 @@ def main():
             p_root = p / f'0{i+1}-{suffix}-seg{"-3d" if is_3d else ""}'
             p_root.mkdir(exist_ok=True)
 
+            chunks = (1, 1) + zarr_shape[-2:] if is_3d else (1,) + zarr_shape[-2:]
+
             za_img = zarr.open(
                 str(p_root / 'imgs.zarr'),
                 'w',
                 shape=zarr_shape,
-                chunks=(1,) + zarr_shape[1:],
+                chunks=chunks,
                 dtype=zarr_dtype,
             )
             za_seg = zarr.open(
                 str(p_root / 'seg_labels.zarr'),
                 'w',
                 shape=zarr_shape,
-                chunks=(1,) + zarr_shape[1:],
+                chunks=chunks,
                 dtype='u1'
             )
             visited_files = set()
@@ -179,9 +181,22 @@ def main():
                             t = re.findall(r'(\d+)', f.name)[0]
                             # 2d data -> 2d labels or 3d data -> 3d labels
                             if n_dims == 2 or is_3d:
-                                za_img[count] = skimage.io.imread(
+                                img = skimage.io.imread(
                                     str(p / f'0{i+1}' / f't{t}.tif')
                                 )
+                                if is_3d:
+                                    za_img[
+                                        count,
+                                        :img.shape[-3],
+                                        :img.shape[-2],
+                                        :img.shape[-1],
+                                    ] = img
+                                else:
+                                    za_img[
+                                        count,
+                                        :img.shape[-2],
+                                        :img.shape[-1],
+                                    ] = img
                             # 3d data -> 2d labels
                             else:
                                 z = int(re.findall(r'(\d+)', f.name)[1])
@@ -190,7 +205,11 @@ def main():
                                         str(p / f'0{i+1}' / f't{t}.tif')
                                     )
                                     last_t = t
-                                za_img[count] = img_cache[z]
+                                za_img[
+                                    count,
+                                    :img_cache.shape[-2],
+                                    :img_cache.shape[-1],
+                                ] = img_cache[z]
                             label = skimage.io.imread(str(f))
                             if (ref_type == 'GT' and
                                     f.name in sparse_data.get(f'0{i+1}', [])):
@@ -246,7 +265,19 @@ def main():
                                 )
                                 seg[indices_inner_p] = 2
                                 seg[indices_inner] = 3
-                            za_seg[count] = seg
+                            if is_3d:
+                                za_seg[
+                                    count,
+                                    :seg.shape[-3],
+                                    :seg.shape[-2],
+                                    :seg.shape[-1],
+                                ] = seg
+                            else:
+                                za_seg[
+                                    count,
+                                    :seg.shape[-2],
+                                    :seg.shape[-1],
+                                ] = seg
                             count += 1
                             visited_files.add(f.name)
 

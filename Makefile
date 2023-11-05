@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot notebook warmup test apptainer-build apptainer-launch apptainer-shell apptainer-create-rabbitmq-user apptainer-stop
+.PHONY: help rebuild build launch bash bashroot notebook warmup test apptainer-build apptainer-init apptainer-launch apptainer-shell apptainer-create-rabbitmq-user apptainer-stop
 
 help:
 	@cat Makefile
@@ -67,6 +67,8 @@ test:
 
 apptainer-build:
 	apptainer build --fakeroot elephant.sif elephant.def
+
+apptainer-init:
 	apptainer run --fakeroot --bind $(HOME):/root elephant.sif
 
 apptainer-launch:
@@ -86,6 +88,7 @@ apptainer-shell:
 
 apptainer-create-rabbitmq-user:
 	apptainer exec --fakeroot --env RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) --bind $(HOME),$(HOME)/.elephant_binds/var/lib:/var/lib,$(HOME)/.elephant_binds/var/log:/var/log,$(HOME)/.elephant_binds/var/run:/var/run elephant.sif docker/create_rabbitmq_user.sh
+
 
 apptainer-stop:
 	apptainer instance stop elephant

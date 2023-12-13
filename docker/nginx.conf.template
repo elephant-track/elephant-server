@@ -23,7 +23,7 @@ http {
     client_max_body_size 0;
 
     server {
-        listen 80;
+        listen ${ELEPHANT_HTTP_PORT};
         location / {
             try_files $uri @app;
         }

@@ -256,8 +256,15 @@ dependencies:
   - zlib=1.2.11
   - zstd=1.5.0=ha95c52a_0
   - pip:
+    - csbdeep==0.7.2
     - dnspython==2.1.0
     - ./elephant-core
+    - line-profiler==4.1.2
+    - llvmlite==0.39.0
+    - memory-profiler==0.61.0
+    - natsort==8.1.0
+    - numba==0.56.0
     - nvsmi==0.4.2
     - python-etcd==0.4.5
+    - stardist==0.8.3
     - torchelastic==0.2.0

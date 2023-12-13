@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
+FROM nvidia/cuda:11.3.1-runtime-ubuntu20.04
 # Modified from https://github.com/tiangolo/uwsgi-nginx-flask-docker (Apache license)
 
 LABEL maintainer="Ko Sugawara <ko.sugawara@ens-lyon.fr>"
@@ -13,19 +13,30 @@ RUN set -x \
     ca-certificates \
     curl \
     gnupg \
-    gosu && \
+    gosu \
+    gettext-base && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+ENV PATH /opt/conda/bin:$PATH
+SHELL ["/bin/bash", "-c"]
 
 # Install Python modules
 COPY ./environment.yml /tmp/environment.yml
 RUN sed -i '/.\/elephant-core/d' /tmp/environment.yml \
-    && conda install -c conda-forge -y mamba \
+    && curl -OL https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh \
+    && bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp /opt/conda \
+    && rm Miniconda3-py37_4.11.0-Linux-x86_64.sh \
+    && . /opt/conda/etc/profile.d/conda.sh \
+    && conda init \
+    && echo "conda activate base" >> ~/.bashrc \
+    && conda install -c conda-forge -y mamba=0.19.1 \
     && mamba clean -qafy \
     && mamba env update -f /tmp/environment.yml \
     && mamba clean -qafy \
     && rm -rf /tmp/elephant-core \
     && rm /tmp/environment.yml
+RUN mamba install jupyter
 
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
@@ -38,16 +49,15 @@ COPY docker/rabbitmq.sh /rabbitmq.sh
 RUN chmod +x /rabbitmq.sh
 
 # Set up nginx
-COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/nginx.conf.template /etc/nginx/nginx.conf.template
 EXPOSE 80 443
 RUN groupadd -r nginx && useradd -r -g nginx nginx
 # forward request and error logs to docker log collector
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-RUN pip install memory_profiler line_profiler
-RUN mamba install jupyter
-RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
+# RUN pip install memory_profiler line_profiler
+# RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 
 # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
 COPY docker/uwsgi.ini /etc/uwsgi/uwsgi.ini
@@ -76,7 +86,6 @@ ENTRYPOINT ["/entrypoint.sh"]
 
 COPY ./elephant-core /tmp/elephant-core
 RUN pip install -U /tmp/elephant-core && rm -rf /tmp/elephant-core
-
 
 # Run the start script provided by the parent image tiangolo/uwsgi-nginx.
 # It will check for an /app/prestart.sh script (e.g. for migrations)

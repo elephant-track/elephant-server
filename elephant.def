@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
+From: nvidia/cuda:11.3.1-runtime-ubuntu20.04
 
 %files
     ./docker /docker
@@ -15,8 +15,14 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     export PYTHONPATH=/app
     export MKL_THREADING_LAYER=GNU
     export GRPC_POLL_STRATEGY=epoll1
+    export PATH=/opt/conda/bin:$PATH
+    export RABBITMQ_USER=user
+    export RABBITMQ_PASSWORD=user
+    export RABBITMQ_MANAGEMENT_PORT=15672
+    export RABBITMQ_PID_FILE=/var/lib/rabbitmq/mnesia/rabbitmq.pid
+    export ElEPHANT_HTTP_PORT=8080
 
-%post
+%post -c /bin/bash
     # Install requirements
     set -x \
     && apt-get update \
@@ -26,13 +32,22 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     supervisor \
     ca-certificates \
     curl \
-    gnupg && \
+    gnupg \
+    gosu \
+    gettext-base && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
     # Install Python modules
     sed -i 's/.\/elephant-core/\/src\/elephant-core/g' /src/environment.yml \
-    && conda install -c conda-forge -y mamba \
+    && curl -OL https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh \
+    && bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp /opt/conda \
+    && rm Miniconda3-py37_4.11.0-Linux-x86_64.sh \
+    && . /opt/conda/etc/profile.d/conda.sh \
+    && conda init \
+    && echo "conda activate base" >> ~/.bashrc \
+    && conda install -c conda-forge -y mamba==0.19.1 \
+    && mamba clean -qafy \
     && mamba env update -f /src/environment.yml \
     && mamba clean -qafy \
     && rm -rf /src/elephant-core \
@@ -40,19 +55,20 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
 
     # Install and set up RabbbitMQ
     chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh
+    echo "rabbitmq-server \$@" > /rabbitmq.sh
+    chmod +x /rabbitmq.sh
     cp /docker/rabbitmq-env.conf /etc/rabbitmq/rabbitmq-env.conf
+    export RABBITMQ_USER=user
+    export RABBITMQ_PASSWORD=user
+    export RABBITMQ_MANAGEMENT_PORT=15672
+    cp /docker/setup-rabbitmq.sh /setup-rabbitmq.sh
+    chmod +x /setup-rabbitmq.sh
 
-    RABBITMQ_USER=user && RABBITMQ_PASSWORD=user
-    /etc/init.d/rabbitmq-server start
-    rabbitmqctl add_user $RABBITMQ_USER $RABBITMQ_PASSWORD 2>/dev/null
-    rabbitmqctl set_user_tags $RABBITMQ_USER administrator
-    rabbitmqctl set_permissions -p / $RABBITMQ_USER ".*" ".*" ".*"
-    /etc/init.d/rabbitmq-server stop
+    /setup-rabbitmq.sh
 
     # Set up nginx
-    cp /docker/nginx.conf /etc/nginx/nginx.conf
-    groupadd nginx && useradd -g nginx nginx
-    sed -i 's/listen 80/listen 8080/g' /etc/nginx/nginx.conf
+    cp /docker/nginx.conf.template /etc/nginx/nginx.conf.template
+    groupadd -r nginx && useradd -r -g nginx nginx
 
     # forward request and error logs to docker log collector
     ln -sf /dev/stdout /var/log/nginx/access.log && \
@@ -64,7 +80,6 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
 
     # Custom Supervisord config
     cp /docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-    sed -i 's#/usr/bin/pidproxy /var/lib/rabbitmq/mnesia/rabbitmq.pid /bin/bash -c "/rabbitmq.sh"#rabbitmq-server#g' /etc/supervisor/conf.d/supervisord.conf
     sed -i '/user=user/d' /etc/supervisor/conf.d/supervisord.conf
     sed -i '/group=user/d' /etc/supervisor/conf.d/supervisord.conf
 
@@ -84,6 +99,8 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     mkdir -p $HOME/.elephant_binds/etc
     cp -a /etc/nginx $HOME/.elephant_binds/etc/
     cp -a /etc/rabbitmq $HOME/.elephant_binds/etc/
+    chown -R $(id -u):$(id -g) $HOME/.elephant_binds
+
 
 %labels
     Author Ko Sugawara <ko.sugawara@ens-lyon.fr>
@@ -92,7 +109,7 @@ From: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-runtime
     This is a container to run ELEPHANt server.
     Usage:
     apptainer build --fakeroot elephant.sif elephant.def
-    apptainer run --bind $HOME elephant.sif
+    apptainer run --fakeroot --bind $HOME:/root elephant.sif
     apptainer instance start --nv --bind $HOME,$HOME/.elephant_binds/var/lib:/var/lib,$HOME/.elephant_binds/var/log:/var/log,$HOME/.elephant_binds/var/run:/var/run,$HOME/.elephant_binds/etc/nginx:/etc/nginx,$HOME/.elephant_binds/etc/rabbitmq:/etc/rabbitmq,$ELEPHANT_WORKSPACE:/workspace elephant.sif elephant
     apptainer exec instance://elephant python /opt/elephant/script/dataset_generator.py --uint16 /workspace/datasets/elephant-demo/elephant-demo.h5 /workspace/datasets/elephant-demo
     SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 apptainer exec instance://elephant /start.sh

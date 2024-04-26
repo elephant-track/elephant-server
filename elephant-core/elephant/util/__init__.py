@@ -26,10 +26,19 @@
 
 from collections import OrderedDict
 import os
+import random
 import sys
+import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+import zarr
+
+from elephant.logging import logger
+
+# Set random seed
+random.seed(42)
 
 RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
@@ -62,9 +71,18 @@ def get_next_multiple(value, base):
 
 
 def get_pad_size(size, base):
-    assert float(size).is_integer(), 'size should be integer value'
+    assert float(size).is_integer(), "size should be integer value"
     pad_total = get_next_multiple(size, base) - size
     return pad_total // 2, pad_total - (pad_total // 2)
+
+
+def normalize_slice_median(img):
+    global_median = np.median(img)
+    for z in range(img.shape[0]):
+        slice_median = np.median(img[z])
+        if 0 < slice_median:
+            img[z] -= slice_median - global_median
+    return img
 
 
 def normalize_zero_one(data):
@@ -73,6 +91,46 @@ def normalize_zero_one(data):
     if 0 < data_max:
         data /= data_max
     return data
+
+
+def resize(img, img_size):
+    return F.interpolate(
+        torch.from_numpy(img)[None, None],
+        size=img_size,
+        mode="trilinear" if img.ndim == 3 else "bilinear",
+        align_corners=True,
+    )[0, 0].numpy()
+
+
+def get_random_crop_box(za, timepoint=None, min_crop_size=None):
+    if min_crop_size is None:
+        min_crop_size = (1, 1, 1)
+    chunk_shape = za.chunks
+    for i in range(6):
+        files = [file for file in os.listdir(za.store.path) if not file.startswith(".")]
+        if timepoint is not None:
+            files = [file for file in files if file.startswith(str(timepoint))]
+        if not files:
+            if i < 5:
+                logger().info(f"No chunk found retrying {i + 1}/5")
+                time.sleep(1)
+                continue
+            raise ValueError(
+                f"No chunk found in {za.store.path}" + f" at timepoint {timepoint}"
+                if timepoint is not None
+                else ""
+            )
+        break
+    file = random.choice(files)
+    idx = tuple(map(int, file.split(".")))
+    slices = [
+        slice(i * chunk_size, min((i + 1) * chunk_size, dim_size))
+        for i, chunk_size, dim_size in zip(idx, chunk_shape, za.shape)
+    ][1:]
+    crop_size = [max(mcs, sl.stop - sl.start) for mcs, sl in zip(min_crop_size, slices)]
+    crop_origin = [max(0, sl.stop - cs) for sl, cs in zip(slices, crop_size)]
+    crop_box = crop_origin + crop_size
+    return crop_box
 
 
 def get_device():
@@ -88,8 +146,8 @@ def get_device():
 
 class LRUCacheDict:
 
-    def __init__(self, maxbytes=1024*1024):
-        """ Construct a LRUCacheDict with the cache size.
+    def __init__(self, maxbytes=1024 * 1024):
+        """Construct a LRUCacheDict with the cache size.
 
         Args:
             maxbytes (int): size of the memory capacity for cache in byte.

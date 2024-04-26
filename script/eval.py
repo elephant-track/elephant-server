@@ -32,17 +32,18 @@ from elephant.config import SegmentationEvalConfig
 
 def main():
     config_dict = {
-        'dataset_name': "CMU-1",
+        'dataset_name': "Quail_Day1_Ch1",
         'timepoint': 0,
-        'model_name': "CMU-1_detection.pth",
+        'model_name': "Quail_Day1_Ch1_detection.pth",
         "device": "cuda",
-        "is_3d": False,
-        "crop_size": [384, 384],
-        "scales": [0.5, 0.5],
-        "cache_maxbytes": 0,
-        "use_median": True,
-        "patch": [4096, 4096],
+        "is_3d": True,
+        "crop_box": [6137, 4737, 5, 256, 256, 12],
+        "scales": [1., 1., 1.],
+        "cache_maxbytes": 31708938240,
+        "use_median": False,
+        "patch": [256, 256, 12],
         "use_memmap": False,
+        "input_size": [13264, 9180, 25],
     }
     config = SegmentationEvalConfig(config_dict)
     print(config)

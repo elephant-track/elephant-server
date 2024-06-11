@@ -1317,8 +1317,13 @@ def export_ctc_labels(config, spots_dict):
         for spot in spots:
             centroid = np.array(spot['pos'][::-1])
             centroid = centroid[-n_dims:]
-            indices_center = tuple(int(centroid[i] / config.scales[i])
-                                   for i in range(n_dims))
+            indices_center = tuple(
+                min(
+                    label.shape[i] - 1,
+                    max(0, int(centroid[i] / config.scales[i])),
+                )
+                for i in range(n_dims)
+            )
             label[indices_center] = spot['value']
         skimage.io.imsave(
             os.path.join(savedir, f'mask{t:0{digits}d}.tif'),

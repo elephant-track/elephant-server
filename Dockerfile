@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.1-runtime-ubuntu20.04
+FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 # Modified from https://github.com/tiangolo/uwsgi-nginx-flask-docker (Apache license)
 
 LABEL maintainer="Ko Sugawara <ko.sugawara@ens-lyon.fr>"
@@ -21,23 +21,6 @@ RUN set -x \
 ENV PATH /opt/conda/bin:$PATH
 SHELL ["/bin/bash", "-c"]
 
-# Install Python modules
-COPY ./environment.yml /tmp/environment.yml
-RUN sed -i '/.\/elephant-core/d' /tmp/environment.yml \
-    && curl -OL https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh \
-    && bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp /opt/conda \
-    && rm Miniconda3-py37_4.11.0-Linux-x86_64.sh \
-    && . /opt/conda/etc/profile.d/conda.sh \
-    && conda init \
-    && echo "conda activate base" >> ~/.bashrc \
-    && conda install -c conda-forge -y mamba=0.19.1 \
-    && mamba clean -qafy \
-    && mamba env update -f /tmp/environment.yml \
-    && mamba clean -qafy \
-    && rm -rf /tmp/elephant-core \
-    && rm /tmp/environment.yml
-RUN mamba install jupyter
-
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
 RUN chmod +x /tmp/install-rabbitmq.sh && /tmp/install-rabbitmq.sh && rm /tmp/install-rabbitmq.sh
@@ -56,6 +39,25 @@ RUN groupadd -r nginx && useradd -r -g nginx nginx
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
+# install uWSGI
+RUN conda install -y uwsgi
+
+# install pypi packages
+RUN python -m pip install \
+    celery \
+    flask \
+    flask-restx \
+    flask-redis \
+    zarr \
+    filelock \
+    nvsmi \
+    psutil \
+    scikit-image \
+    pika \
+    redis \
+    h5py \
+    tqdm \
+    tensorflow
 # RUN pip install memory_profiler line_profiler
 # RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 

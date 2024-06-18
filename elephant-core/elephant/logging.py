@@ -33,7 +33,9 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 
 RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
+RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "localhost")
 RABBITMQ_NODE_PORT = int(os.environ.get("RABBITMQ_NODE_PORT", 5672))
+RABBITMQ_VIRTUAL_HOST = os.environ.get("RABBITMQ_VIRTUAL_HOST", "/")
 
 
 class RabbitMQHandler(logging.StreamHandler):
@@ -47,8 +49,15 @@ class RabbitMQHandler(logging.StreamHandler):
     def emit(self, record):
         try:
             msg = self.format(record)
-            publish_mq('log', json.dumps({'level': record.levelname,
-                                          'message': msg, }))
+            publish_mq(
+                "log",
+                json.dumps(
+                    {
+                        "level": record.levelname,
+                        "message": msg,
+                    }
+                ),
+            )
             stream = self.stream
             # issue 35046: merged two stream.writes into one.
             stream.write(msg + self.terminator)
@@ -62,16 +71,22 @@ class RabbitMQHandler(logging.StreamHandler):
 def logger():
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    if (all(not isinstance(h, RabbitMQHandler) for h in logger.handlers)):
+    if all(not isinstance(h, RabbitMQHandler) for h in logger.handlers):
         logger.addHandler(RabbitMQHandler())
     return logger
 
 
 def publish_mq(queue, body):
-    if RUN_ON_FLASK:
-        with pika.BlockingConnection(pika.ConnectionParameters(
-                host='localhost', port=RABBITMQ_NODE_PORT, heartbeat=0)) as connection:
+    if RUN_ON_FLASK and False:
+        with pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host=RABBITMQ_HOST,
+                port=RABBITMQ_NODE_PORT,
+                virtual_host=RABBITMQ_VIRTUAL_HOST,
+                heartbeat=0,
+            )
+        ) as connection:
             connection.channel().queue_declare(queue=queue)
-            connection.channel().basic_publish(exchange='',
-                                               routing_key=queue,
-                                               body=body)
+            connection.channel().basic_publish(
+                exchange="", routing_key=queue, body=body
+            )

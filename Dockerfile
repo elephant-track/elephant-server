@@ -30,6 +30,8 @@ ENV RABBITMQ_PASSWORD user
 ENV RABBITMQ_PID_FILE /var/lib/rabbitmq/mnesia/rabbitmq.pid
 COPY docker/rabbitmq.sh /rabbitmq.sh
 RUN chmod +x /rabbitmq.sh
+COPY docker/rabbitmq-vhosts.sh /rabbitmq-vhosts.sh
+RUN chmod +x /rabbitmq-vhosts.sh
 
 # Set up nginx
 COPY docker/nginx.conf.template /etc/nginx/nginx.conf.template
@@ -60,6 +62,8 @@ RUN python -m pip install \
     tensorflow
 # RUN pip install memory_profiler line_profiler
 # RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
+
+RUN python -m pip install dask[complete]
 
 # Copy the base uWSGI ini file to enable default dynamic uwsgi process number
 COPY docker/uwsgi.ini /etc/uwsgi/uwsgi.ini

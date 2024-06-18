@@ -37,6 +37,7 @@ import shutil
 import tempfile
 import time
 
+from dask import delayed, compute
 import numpy as np
 from scipy import ndimage
 from skimage.filters import gaussian
@@ -946,9 +947,9 @@ def _region_to_spot(
         # print('skip a spot with volume {} below threshold {}'
         #       .format(area, min_area))
         return None
-    if mean_intensity < 0.2:
+    if mean_intensity < 0:
         logger().debug(
-            f"skip a spot with mean intensity {mean_intensity} below threshold 0.1"
+            f"skip a spot with mean intensity {mean_intensity} below threshold 0.2"
         )
         return None
     centroid = [(o + c) * s for c, s, o in zip(centroid, scales, origins)]
@@ -1101,7 +1102,7 @@ def _find_and_push_spots(
         f'calculating {"ellipse" if n_dims == 2 else "ellipsoid"} parameters...'
     )
     # multiprocessing does not help so much
-    if PROFILE or True:
+    if PROFILE:
         results = [
             _region_to_spot(
                 min_area,
@@ -1118,32 +1119,31 @@ def _find_and_push_spots(
             )
             for props in props_list
         ]
-        for r in results:
-            if redis_client is not None and get_state() == TrainState.IDLE.value:
-                raise KeyboardInterrupt
-            if r is not None:
-                spots.append(r)
     else:
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = pool.imap(
-                partial(
-                    _region_to_spot,
-                    min_area,
-                    scales,
-                    origins,
-                    n_dims,
-                    use_2d,
-                    c_ratio,
-                    idx,
-                    r_min,
-                    r_max,
-                    i_frame,
-                ),
-                props_list,
+        # Wrap your function with delayed
+        results = [
+            delayed(_region_to_spot)(
+                min_area,
+                scales,
+                origins,
+                n_dims,
+                use_2d,
+                c_ratio,
+                idx,
+                r_min,
+                r_max,
+                i_frame,
+                props,
             )
-            for r in results:
-                if r is not None:
-                    spots.append(r)
+            for props in props_list
+        ]
+        # Use Dask to compute the results in parallel
+        results = compute(*results)
+    for r in results:
+        if redis_client is not None and get_state() == TrainState.IDLE.value:
+            raise KeyboardInterrupt
+        if r is not None:
+            spots.append(r)
     logger().info(f"{len(spots)} detections kept")
 
 

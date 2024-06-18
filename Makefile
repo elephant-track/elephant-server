@@ -1,4 +1,4 @@
-.PHONY: help rebuild build launch bash bashroot notebook warmup test apptainer-build apptainer-init apptainer-launch apptainer-shell apptainer-create-rabbitmq-user apptainer-stop
+.PHONY: help rebuild build launch launch-no-rabbitmq bash bashroot notebook warmup rabbitmq-vhosts test apptainer-build apptainer-init apptainer-launch apptainer-shell apptainer-create-rabbitmq-user apptainer-stop
 
 help:
 	@cat Makefile
@@ -8,9 +8,11 @@ ELEPHANT_WORKSPACE?=${PWD}/workspace
 ELEPHANT_IMAGE_NAME?=elephant-server:0.6.0-dev
 ELEPHANT_NVIDIA_GID?=$$(ls -n /dev/nvidia0 2>/dev/null | awk '{print $$4}')
 ELEPHANT_DOCKER?=docker
-ELEPHANT_RABBITMQ_NODENAME?=rabbit@localhost
+ELEPHANT_RABBITMQ_HOST?=localhost
+ELEPHANT_RABBITMQ_NODENAME?=rabbit@$(ELEPHANT_RABBITMQ_HOST)
 ELEPHANT_RABBITMQ_NODE_PORT?=5672
 ELEPHANT_RABBITMQ_MANAGEMENT_PORT?=15672
+ELEPHANT_RABBITMQ_VIRTUAL_HOST?=/
 ELEPHANT_RABBITMQ_USER?=user
 ELEPHANT_RABBITMQ_PASSWORD?=user
 ELEPHANT_RABBITMQ_PID_FILE?=/var/lib/rabbitmq/mnesia/rabbitmq.pid
@@ -55,9 +57,34 @@ launch: warmup
 	-e LOCAL_UID=$(shell id -u) \
 	-e LOCAL_GID=$(shell id -g) \
 	-e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
+	-e RABBITMQ_HOST=$(ELEPHANT_RABBITMQ_HOST) \
 	-e RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) \
 	-e RABBITMQ_NODE_PORT=$(ELEPHANT_RABBITMQ_NODE_PORT) \
 	-e RABBITMQ_MANAGEMENT_PORT=$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+	-e RABBITMQ_VIRTUAL_HOST=$(ELEPHANT_RABBITMQ_VIRTUAL_HOST) \
+	-e RABBITMQ_USER=$(ELEPHANT_RABBITMQ_USER) \
+	-e RABBITMQ_PASSWORD=$(ELEPHANT_RABBITMQ_PASSWORD) \
+	-e RABBITMQ_PID_FILE=$(ELEPHANT_RABBITMQ_PID_FILE) \
+	-e ELEPHANT_REDIS_PORT=$(ELEPHANT_REDIS_PORT) \
+	-e ELEPHANT_HTTP_PORT=$(ELEPHANT_HTTP_PORT) \
+	-e ELEPHANT_BATCH_ID=$(ELEPHANT_BATCH_ID) \
+	$(ELEPHANT_IMAGE_NAME)
+
+launch-no-rabbitmq: warmup
+	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
+	-v ${PWD}/workspace/datasets/Quail_Day1_Ch1/imgs.zarr:/workspace/datasets/Quail_Day1_Ch1/imgs.zarr \
+	-v ${PWD}/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr:/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr \
+	-v $(PWD)/app/prestart-disable-rabbitmq.sh:/app/prestart.sh \
+	--network rabbitmq \
+	-p $(ELEPHANT_HTTP_PORT):$(ELEPHANT_HTTP_PORT) \
+	-e LOCAL_UID=$(shell id -u) \
+	-e LOCAL_GID=$(shell id -g) \
+	-e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
+	-e RABBITMQ_HOST=rabbitmq \
+	-e RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) \
+	-e RABBITMQ_NODE_PORT=$(ELEPHANT_RABBITMQ_NODE_PORT) \
+	-e RABBITMQ_MANAGEMENT_PORT=$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+	-e RABBITMQ_VIRTUAL_HOST=$(ELEPHANT_RABBITMQ_VIRTUAL_HOST) \
 	-e RABBITMQ_USER=$(ELEPHANT_RABBITMQ_USER) \
 	-e RABBITMQ_PASSWORD=$(ELEPHANT_RABBITMQ_PASSWORD) \
 	-e RABBITMQ_PID_FILE=$(ELEPHANT_RABBITMQ_PID_FILE) \
@@ -68,7 +95,10 @@ launch: warmup
 
 bash: warmup
 	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
+	-v /lustre1/users/sugawara/bigdataserver/00_Kakshine:/00_Kakshine \
+	-v ${PWD}/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr:/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
+	--network rabbitmq \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
 
 bashroot: warmup
@@ -79,6 +109,21 @@ notebook: warmup
 	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
 	--network host -p $(ELEPHANT_NOTEBOOK_PORT):$(ELEPHANT_NOTEBOOK_PORT) $(ELEPHANT_IMAGE_NAME) jupyter notebook --no-browser --port=$(ELEPHANT_NOTEBOOK_PORT) --notebook-dir=/workspace
+
+rabbitmq-vhosts:
+	$(ELEPHANT_DOCKER) run -it --rm \
+	--name rabbitmq \
+	--network rabbitmq \
+	-p $(ELEPHANT_RABBITMQ_NODE_PORT):$(ELEPHANT_RABBITMQ_NODE_PORT) \
+	-p $(ELEPHANT_RABBITMQ_MANAGEMENT_PORT):$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+	-e RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) \
+	-e RABBITMQ_NODE_PORT=$(ELEPHANT_RABBITMQ_NODE_PORT) \
+	-e RABBITMQ_MANAGEMENT_PORT=$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+	-e RABBITMQ_VIRTUAL_HOST=$(ELEPHANT_RABBITMQ_VIRTUAL_HOST) \
+	-e RABBITMQ_USER=$(ELEPHANT_RABBITMQ_USER) \
+	-e RABBITMQ_PASSWORD=$(ELEPHANT_RABBITMQ_PASSWORD) \
+	-e RABBITMQ_PID_FILE=$(ELEPHANT_RABBITMQ_PID_FILE) \
+	$(ELEPHANT_IMAGE_NAME) /rabbitmq-vhosts.sh
 
 test:
 	$(ELEPHANT_DOCKER) build -t $(ELEPHANT_IMAGE_NAME)-test -f Dockerfile-test . && $(ELEPHANT_DOCKER) image prune -f 
@@ -102,9 +147,11 @@ apptainer-launch:
 	elephant.sif elephant$(ELEPHANT_BATCH_ID)
 	if [ $(ELEPHANT_GPU) = all ]; then \
 		apptainer exec \
+		--env RABBITMQ_HOST=$(ELEPHANT_RABBITMQ_HOST) \
 		--env RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) \
 		--env RABBITMQ_NODE_PORT=$(ELEPHANT_RABBITMQ_NODE_PORT) \
 		--env RABBITMQ_MANAGEMENT_PORT=$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+		--env RABBITMQ_VIRTUAL_HOST=$(ELEPHANT_RABBITMQ_VIRTUAL_HOST) \
 		--env RABBITMQ_USER=$(ELEPHANT_RABBITMQ_USER) \
 		--env RABBITMQ_PASSWORD=$(ELEPHANT_RABBITMQ_PASSWORD) \
 		--env RABBITMQ_PID_FILE=$(ELEPHANT_RABBITMQ_PID_FILE) \
@@ -115,9 +162,11 @@ apptainer-launch:
 	else \
 		apptainer exec \
 		--env CUDA_VISIBLE_DEVICES=$(ELEPHANT_GPU) \
+		--env RABBITMQ_HOST=$(ELEPHANT_RABBITMQ_HOST) \
 		--env RABBITMQ_NODENAME=$(ELEPHANT_RABBITMQ_NODENAME) \
 		--env RABBITMQ_NODE_PORT=$(ELEPHANT_RABBITMQ_NODE_PORT) \
 		--env RABBITMQ_MANAGEMENT_PORT=$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \
+		--env RABBITMQ_VIRTUAL_HOST=$(ELEPHANT_RABBITMQ_VIRTUAL_HOST) \
 		--env RABBITMQ_USER=$(ELEPHANT_RABBITMQ_USER) \
 		--env RABBITMQ_PASSWORD=$(ELEPHANT_RABBITMQ_PASSWORD) \
 		--env RABBITMQ_PID_FILE=$(ELEPHANT_RABBITMQ_PID_FILE) \

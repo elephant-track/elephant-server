@@ -129,6 +129,9 @@ def get_random_crop_box(za, timepoint=None, min_crop_size=None):
     ][1:]
     crop_size = [max(mcs, sl.stop - sl.start) for mcs, sl in zip(min_crop_size, slices)]
     crop_origin = [max(0, sl.stop - cs) for sl, cs in zip(slices, crop_size)]
+    if len(crop_size) == 2:
+        crop_size = [0] + crop_size
+        crop_origin = [0] + crop_origin
     crop_box = crop_origin + crop_size
     return crop_box
 

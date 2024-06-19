@@ -683,7 +683,8 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
             crop_box = get_random_crop_box(self.za_label, i_frame, self.crop_size)
 
         crop_size_resize = [
-            int(crop_box[-self.n_dims + d] * self.resize_factor[d]) for d in range(self.n_dims)
+            int(crop_box[-self.n_dims + d] * self.resize_factor[d])
+            for d in range(self.n_dims)
         ]
         img_input = get_input_at(
             self.za_input,

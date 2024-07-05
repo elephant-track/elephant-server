@@ -73,6 +73,8 @@ def _preprocess(img, use_median=False, img_size=None):
 
 
 def _crop_box_to_slices(crop_box, timepoint, is_3d=False):
+    if crop_box is None:
+        return (timepoint,) + (slice(None),) * (3 if is_3d else 2)
     slices = (
         slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
         slice(crop_box[2], crop_box[2] + crop_box[5]),  # X
@@ -91,10 +93,7 @@ def _get_memmap_or_load(
     img_size=None,
     crop_box=None,
 ):
-    if crop_box is not None:
-        slices = _crop_box_to_slices(crop_box, timepoint, za.ndim == 4)
-    else:
-        slices = (timepoint,) + (slice(None),) * (za.ndim - 1)
+    slices = _crop_box_to_slices(crop_box, timepoint, za.ndim == 4)
     if memmap_dir:
         key = f"{Path(za.store.path).parent.name}-t{timepoint}-{use_median}"
         if img_size is not None:
@@ -893,7 +892,6 @@ class FlowDatasetZarr(du.Dataset):
         ):
             length = None
         self.length = length
-        original_size = self.za_input.shape[-self.n_dims :]
         crop_size = tuple(min(crop_size[i], img_size[i]) for i in range(len(crop_size)))
         self.img_size = tuple(img_size)
         self.crop_size = crop_size
@@ -928,6 +926,8 @@ class FlowDatasetZarr(du.Dataset):
             key = f"{Path(self.za_label.store.path).parent.name}-t{timepoint}"
             if img_size is not None:
                 key += "-" + "-".join(map(str, img_size))
+            if crop_box is not None:
+                key += "-" + "-".join(map(str, crop_box))
             key += "-flowlabel"
             fpath = Path(self.memmap_dir) / f"{key}.dat"
             lock = FileLock(str(fpath) + ".lock")
@@ -1012,17 +1012,14 @@ class FlowDatasetZarr(du.Dataset):
             cache_dict=self.cache_dict_input,
             memmap_dir=self.memmap_dir,
             img_size=self.img_size,
+            crop_box=crop_box,
         )
-        if self.za_input.shape[1:] != self.img_size:
-            resize_factor = [
-                self.img_size[d] / self.za_input.shape[1 + d]
-                for d in range(self.n_dims)
-            ]
-        else:
-            resize_factor = [
-                1,
-            ] * self.n_dims
-        img_label = self._get_label_at(i_frame, img_size=self.img_size)
+        img_label = self._get_label_at(
+            i_frame,
+            img_size=self.img_size,
+            crop_box=crop_box,
+        )
+
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input)
             tensor_label = torch.from_numpy(img_label)
@@ -1050,7 +1047,7 @@ class FlowDatasetZarr(du.Dataset):
                 item_crop_size = self.crop_size
             if self.rotation_angle is not None and 0 < self.rotation_angle:
                 # rotate image
-                theta = random.random.randint(-self.rotation_angle, self.rotation_angle)
+                theta = random.randint(-self.rotation_angle, self.rotation_angle)
                 cos_theta = math.cos(math.radians(theta))
                 sin_theta = math.sin(math.radians(theta))
                 for i in (-2, -1):
@@ -1060,16 +1057,10 @@ class FlowDatasetZarr(du.Dataset):
                     min(img_input.shape[i], item_crop_size[i])
                     for i in range(self.n_dims)
                 ]
-            za_label_a = zarr.open(self.zpath_flow_label, mode="a")
-            index_pool = za_label_a.attrs.get(f"label.indices.{i_frame}")
-            if index_pool is None:
-                index_pool = np.argwhere(0 < img_label[-1])
-                za_label_a.attrs[f"label.indices.{i_frame}"] = tuple(
-                    map(tuple, index_pool.tolist())
-                )
+            index_pool = np.argwhere(0 < img_label[-1])
             base_index = random.choice(index_pool)
             origins = [
-                random.random.randint(
+                random.randint(
                     max(
                         0,
                         base_index[i] - (item_crop_size[i] - 1),

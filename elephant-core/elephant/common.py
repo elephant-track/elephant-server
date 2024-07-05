@@ -1352,7 +1352,6 @@ def _get_flow_prediction(
         device,
         False,
         patch_size,
-        crop_box,
         is_logging,
         batch_size,
         memmap_dir,

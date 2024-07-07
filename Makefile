@@ -72,8 +72,6 @@ launch: warmup
 
 launch-no-rabbitmq: warmup
 	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
-	-v ${PWD}/workspace/datasets/Quail_Day1_Ch1/imgs.zarr:/workspace/datasets/Quail_Day1_Ch1/imgs.zarr \
-	-v ${PWD}/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr:/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr \
 	-v $(PWD)/app/prestart-disable-rabbitmq.sh:/app/prestart.sh \
 	--network rabbitmq \
 	-p $(ELEPHANT_HTTP_PORT):$(ELEPHANT_HTTP_PORT) \
@@ -95,10 +93,7 @@ launch-no-rabbitmq: warmup
 
 bash: warmup
 	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
-	-v /lustre1/users/sugawara/bigdataserver/00_Kakshine:/00_Kakshine \
-	-v ${PWD}/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr:/workspace/datasets/Fig5-6_Flamindo2/imgs.zarr \
 	-e LOCAL_UID=$(shell id -u) -e LOCAL_GID=$(shell id -g) -e AS_LOCAL_USER=1 -e NVIDIA_GID=$(ELEPHANT_NVIDIA_GID) \
-	--network rabbitmq \
 	$(ELEPHANT_IMAGE_NAME) /bin/bash
 
 bashroot: warmup

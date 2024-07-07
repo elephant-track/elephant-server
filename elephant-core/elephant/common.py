@@ -1204,7 +1204,7 @@ def detect_spots(
             resize_factor = [input_size[d] / original_size[d] for d in range(n_dims)]
             if crop_box is not None:
                 img_size = [
-                    int(crop_box[d + 3] * resize_factor[d]) for d in range(n_dims)
+                    int(crop_box[n_dims + d] * resize_factor[d]) for d in range(n_dims)
                 ]
             else:
                 img_size = input_size

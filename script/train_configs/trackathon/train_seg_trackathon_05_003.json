@@ -1,0 +1,10 @@
+[
+    {
+        "dataset_name": "trackathon_05_improved_zt1",
+        "t_min": 18,
+        "t_max": 72,
+        "model_name": "trackathon_batch/trackathon_05_improved_zt1_detection_003.pth",
+        "log_dir": "trackathon_batch/trackathon_05_improved_zt1_detection_003.log",
+        "n_crops": 50
+    }
+]

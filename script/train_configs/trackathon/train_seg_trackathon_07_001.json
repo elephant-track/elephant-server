@@ -1,0 +1,10 @@
+[
+    {
+        "dataset_name": "trackathon_07_4E",
+        "t_min": 18,
+        "t_max": 72,
+        "model_name": "trackathon_batch/trackathon_07_4E_detection_001.pth",
+        "log_dir": "trackathon_batch/trackathon_07_4E_detection_001.log",
+        "n_crops": 50
+    }
+]

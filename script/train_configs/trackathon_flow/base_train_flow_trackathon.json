@@ -1,0 +1,27 @@
+{
+    "device": "cuda",
+    "input_size": [
+        512,
+        512,
+        20
+    ],
+    "crop_size": [
+        128,
+        128,
+        16
+    ],
+    "lr": 0.00001,
+    "n_crops": 100,
+    "n_epochs": 10,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0,
+    "is_3d": true,
+    "batch_size": 1,
+    "nmodels": 1,
+    "n_keep_axials": 2,
+    "log_interval": 20,
+    "cache_maxbytes": 10737418240,
+    "url": "Versatile"
+}

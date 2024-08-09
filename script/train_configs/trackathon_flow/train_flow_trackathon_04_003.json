@@ -1,0 +1,10 @@
+[
+    {
+        "dataset_name": "trackathon_04_improved_t",
+        "t_min": 18,
+        "t_max": 72,
+        "model_name": "trackathon_batch_flow/trackathon_04_improved_t_flow_003.pth",
+        "log_dir": "trackathon_batch_flow/trackathon_04_improved_t_flow_003.log",
+        "n_crops": 50
+    }
+]

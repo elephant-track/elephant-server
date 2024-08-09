@@ -1,0 +1,9 @@
+[
+    {
+        "dataset_name": "trackathon_01_standard",
+        "t_min": 9,
+        "t_max": 36,
+        "model_name": "trackathon_batch_flow/trackathon_01_standard_flow_003.pth",
+        "log_dir": "trackathon_batch_flow/trackathon_01_standard_flow_003.log"
+    }
+]

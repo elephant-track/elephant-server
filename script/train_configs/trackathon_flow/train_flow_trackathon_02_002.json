@@ -1,0 +1,9 @@
+[
+    {
+        "dataset_name": "trackathon_02_standard_n2v_200epoch",
+        "t_min": 9,
+        "t_max": 36,
+        "model_name": "trackathon_batch_flow/trackathon_02_standard_n2v_200epoch_flow_002.pth",
+        "log_dir": "trackathon_batch_flow/trackathon_02_standard_n2v_200epoch_flow_002.log"
+    }
+]

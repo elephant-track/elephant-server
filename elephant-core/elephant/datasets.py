@@ -122,7 +122,6 @@ def _get_memmap_or_load(
                 shape=img_shape,
             )
     else:
-        logger().info(f"loading from {za.store.path} at {slices}")
         return _preprocess(
             za[slices].astype("float32"),
             use_median=use_median,
@@ -337,10 +336,6 @@ class SegmentationDatasetBase(du.Dataset):
                 ]
             else:
                 base_index = random.choice(index_pool)
-                logger().debug(f"base_index: {base_index}")
-                logger().debug(f"item_crop_size: {item_crop_size}")
-                logger().debug(f"resize_factor: {self.resize_factor}")
-                logger().debug(f"img_input.shape: {img_input.shape}")
                 origins = [
                     random.randint(
                         max(
@@ -696,7 +691,6 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
         if self.is_ae:
             img_label = img_input
         else:
-            logger().debug(f"loading label at {i_frame}")
             img_label = self._get_label_at(i_frame, crop_size_resize, crop_box=crop_box)
         self.i_frame = i_frame
 

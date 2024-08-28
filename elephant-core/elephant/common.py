@@ -946,9 +946,9 @@ def _region_to_spot(
         # print('skip a spot with volume {} below threshold {}'
         #       .format(area, min_area))
         return None
-    if mean_intensity < 0.2:
+    if mean_intensity < 0.0:
         logger().debug(
-            f"skip a spot with mean intensity {mean_intensity} below threshold 0.1"
+            f"skip a spot with mean intensity {mean_intensity} below threshold 0.0"
         )
         return None
     centroid = [(o + c) * s for c, s, o in zip(centroid, scales, origins)]

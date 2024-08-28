@@ -109,7 +109,7 @@ def get_random_crop_box(za, timepoint=None, min_crop_size=None):
     for i in range(6):
         files = [file for file in os.listdir(za.store.path) if not file.startswith(".")]
         if timepoint is not None:
-            files = [file for file in files if file.startswith(str(timepoint))]
+            files = [file for file in files if file.startswith(str(timepoint) + ".")]
         if not files:
             if i < 5:
                 logger().info(f"No chunk found retrying {i + 1}/5")

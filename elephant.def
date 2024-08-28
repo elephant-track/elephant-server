@@ -6,7 +6,7 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     ./script /opt/elephant/script
     ./app /app
     ./elephant-core /src/elephant-core
-    ./environment.yml /src/environment.yml
+    ./requirements.txt /src/requirements.txt
 
 %environment
     export UWSGI_UID=$(id -u)
@@ -42,21 +42,7 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     conda install -y -c conda-forge uwsgi
 
     # install pypi packages
-    python -m pip install \
-    celery \
-    flask \
-    flask-restx \
-    flask-redis \
-    zarr \
-    filelock \
-    nvsmi \
-    psutil \
-    scikit-image \
-    pika \
-    redis \
-    h5py \
-    tqdm \
-    tensorflow
+    python -m pip install -r /src/requirements.txt && rm /src/requirements.txt
 
     # Install and set up RabbbitMQ
     chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh

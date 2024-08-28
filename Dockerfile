@@ -43,21 +43,8 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
 RUN conda install -y -c conda-forge uwsgi
 
 # install pypi packages
-RUN python -m pip install \
-    celery \
-    flask \
-    flask-restx \
-    flask-redis \
-    zarr \
-    filelock \
-    nvsmi \
-    psutil \
-    scikit-image \
-    pika \
-    redis \
-    h5py \
-    tqdm \
-    tensorflow
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
 # RUN pip install memory_profiler line_profiler
 # RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 

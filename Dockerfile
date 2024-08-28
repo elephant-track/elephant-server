@@ -40,7 +40,7 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
 # install uWSGI
-RUN conda install -y uwsgi
+RUN conda install -y -c conda-forge uwsgi
 
 # install pypi packages
 RUN python -m pip install \

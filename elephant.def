@@ -39,7 +39,7 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     rm -rf /var/lib/apt/lists/*
 
     # Install uWSGI
-    conda install -y uwsgi
+    conda install -y -c conda-forge uwsgi
 
     # install pypi packages
     python -m pip install \

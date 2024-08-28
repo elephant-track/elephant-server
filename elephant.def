@@ -43,6 +43,7 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
     # install pypi packages
     python -m pip install -r /src/requirements.txt && rm /src/requirements.txt
+    python -m pip install /src/elephant-core && rm -r /src/elephant-core
 
     # Install and set up RabbbitMQ
     chmod +x /docker/install-rabbitmq.sh && /docker/install-rabbitmq.sh

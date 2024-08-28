@@ -1,7 +1,7 @@
 # This workflow will install Python dependencies, run tests and lint with a single version of Python
 name: Test
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   build:
@@ -10,35 +10,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/cache@v3
-      id: cache
-      with:
-        path: ~/miniconda
-        key: ubuntu-conda-${{ hashFiles('environment.yml') }}
-    - name: Install Conda
-      if: steps.cache.outputs.cache-hit != 'true'
+    - name: Test with pytest in 
       run: |
-        wget https://repo.continuum.io/miniconda/Miniconda3-py37_4.11.0-Linux-x86_64.sh
-        bash Miniconda3-py37_4.11.0-Linux-x86_64.sh -bfp ~/miniconda
-        rm Miniconda3-py37_4.11.0-Linux-x86_64.sh
-        source ~/miniconda/etc/profile.d/conda.sh
-        conda init
-        conda install -c conda-forge -y mamba
-        mamba clean -qafy
-        mamba env update -f environment.yml
-    - name: Install dependencies
-      run: |
-        ~/miniconda/bin/python -m pip install --upgrade pip
-        ~/miniconda/bin/python -m pip install flake8 pytest
-    - name: Install package
-      run: |
-        ~/miniconda/bin/python -m pip install ./elephant-core
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        ~/miniconda/bin/flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        ~/miniconda/bin/flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-        ~/miniconda/bin/pytest
+        make build
+        make test

@@ -82,7 +82,7 @@ notebook: warmup
 
 test:
 	$(ELEPHANT_DOCKER) build -t $(ELEPHANT_IMAGE_NAME)-test -f Dockerfile-test . && $(ELEPHANT_DOCKER) image prune -f 
-	$(ELEPHANT_DOCKER) run -it --rm $(ELEPHANT_IMAGE_NAME)-test
+	$(ELEPHANT_DOCKER) run --rm $(ELEPHANT_IMAGE_NAME)-test
 
 apptainer-build:
 	apptainer build --fakeroot elephant.sif elephant.def

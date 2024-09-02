@@ -39,9 +39,6 @@ RUN groupadd -r nginx && useradd -r -g nginx nginx
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-# install uWSGI
-RUN conda install -y -c conda-forge uwsgi
-
 # install pypi packages
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt

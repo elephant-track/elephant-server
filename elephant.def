@@ -38,9 +38,6 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-    # Install uWSGI
-    conda install -y -c conda-forge uwsgi
-
     # install pypi packages
     python -m pip install -r /src/requirements.txt && rm /src/requirements.txt
     python -m pip install /src/elephant-core && rm -r /src/elephant-core

@@ -14,20 +14,32 @@ RUN set -x \
     curl \
     gnupg \
     gosu \
-    gettext-base && \
+    gettext-base \
+    build-essential \
+    git \
+    openssl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH /opt/conda/bin:$PATH
 SHELL ["/bin/bash", "-c"]
 
+# Generate TLS certs for RabbitMQ
+ENV RABBITMQ_NODENAME rabbit@localhost
+ENV RABBITMQ_NODE_PORT 5672
+ENV RABBITMQ_MANAGEMENT_PORT 15672
+ENV RABBITMQ_USE_SSL false
+ENV RABBITMQ_SSL_VERIFY verify_none
+ENV RABBITMQ_SSL_FAIL_IF_NO_PEER_CERT false
+ENV RABBITMQ_USER user
+ENV RABBITMQ_PASSWORD user
+ENV RABBITMQ_PID_FILE /var/lib/rabbitmq/mnesia/rabbitmq.pid
+COPY docker/tls-gen.sh /tls-gen.sh
+
 # Install and set up RabbbitMQ
 COPY docker/install-rabbitmq.sh /tmp/install-rabbitmq.sh
 RUN chmod +x /tmp/install-rabbitmq.sh && /tmp/install-rabbitmq.sh && rm /tmp/install-rabbitmq.sh
 EXPOSE 5672
-ENV RABBITMQ_USER user
-ENV RABBITMQ_PASSWORD user
-ENV RABBITMQ_PID_FILE /var/lib/rabbitmq/mnesia/rabbitmq.pid
 COPY docker/rabbitmq.sh /rabbitmq.sh
 RUN chmod +x /rabbitmq.sh
 

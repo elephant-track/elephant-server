@@ -16,6 +16,9 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     export MKL_THREADING_LAYER=GNU
     export GRPC_POLL_STRATEGY=epoll1
     export PATH=/opt/conda/bin:$PATH
+    export RABBITMQ_USE_SSL=false
+    export RABBITMQ_SSL_VERIFY verify_none
+    export RABBITMQ_SSL_FAIL_IF_NO_PEER_CERT false
     export RABBITMQ_USER=user
     export RABBITMQ_PASSWORD=user
     export RABBITMQ_MANAGEMENT_PORT=15672
@@ -42,6 +45,16 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     python -m pip install -r /src/requirements.txt && rm /src/requirements.txt
     python -m pip install /src/elephant-core && rm -r /src/elephant-core
 
+    export RABBITMQ_USE_SSL=false
+    export RABBITMQ_SSL_VERIFY verify_none
+    export RABBITMQ_SSL_FAIL_IF_NO_PEER_CERT false
+    export RABBITMQ_USER=user
+    export RABBITMQ_PASSWORD=user
+    export RABBITMQ_MANAGEMENT_PORT=15672
+
+    cp /docker/tls-gen.sh /tmp/tls-gen.sh
+    bash /tmp/tls-gen.sh && rm /tmp/tls-gen.sh
+
     # Install and set up RabbbitMQ
         # Install Python modules
     sed -i 's/sudo //g' /docker/install-rabbitmq.sh
@@ -49,9 +62,6 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     echo "rabbitmq-server \$@" > /rabbitmq.sh
     chmod +x /rabbitmq.sh
     cp /docker/rabbitmq-env.conf /etc/rabbitmq/rabbitmq-env.conf
-    export RABBITMQ_USER=user
-    export RABBITMQ_PASSWORD=user
-    export RABBITMQ_MANAGEMENT_PORT=15672
     cp /docker/setup-rabbitmq.sh /setup-rabbitmq.sh
     chmod +x /setup-rabbitmq.sh
 

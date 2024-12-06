@@ -20,6 +20,10 @@ export UWSGI_GID=user
 export MKL_THREADING_LAYER=GNU
 export GRPC_POLL_STRATEGY=epoll1
 
+if [ $RABBITMQ_USE_SSL = "true" ]; then
+  bash /tls-gen.sh
+fi
+
 if [[ -z "${AS_LOCAL_USER}" ]]; then
   "$@"
 else

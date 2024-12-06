@@ -26,6 +26,7 @@
 import logging
 import json
 import os
+import ssl
 
 import pika
 
@@ -34,6 +35,8 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
 RABBITMQ_NODE_PORT = int(os.environ.get("RABBITMQ_NODE_PORT", 5672))
+RABBITMQ_USE_SSL = os.environ.get("RABBITMQ_USE_SSL", "false").lower() == "true"
+RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "user")
 
 
 class RabbitMQHandler(logging.StreamHandler):
@@ -47,8 +50,15 @@ class RabbitMQHandler(logging.StreamHandler):
     def emit(self, record):
         try:
             msg = self.format(record)
-            publish_mq('log', json.dumps({'level': record.levelname,
-                                          'message': msg, }))
+            publish_mq(
+                "log",
+                json.dumps(
+                    {
+                        "level": record.levelname,
+                        "message": msg,
+                    }
+                ),
+            )
             stream = self.stream
             # issue 35046: merged two stream.writes into one.
             stream.write(msg + self.terminator)
@@ -62,16 +72,35 @@ class RabbitMQHandler(logging.StreamHandler):
 def logger():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    if (all(not isinstance(h, RabbitMQHandler) for h in logger.handlers)):
+    if all(not isinstance(h, RabbitMQHandler) for h in logger.handlers):
         logger.addHandler(RabbitMQHandler())
     return logger
 
 
+if RUN_ON_FLASK:
+    if RABBITMQ_USE_SSL:
+        context = ssl.create_default_context(
+            cafile="/etc/ssl/mycerts/ca_certificate.pem"
+        )
+        context.load_cert_chain(
+            certfile=f"/etc/ssl/mycerts/client_{RABBITMQ_USER}_certificate.pem",
+            keyfile=f"/etc/ssl/mycerts/client_{RABBITMQ_USER}_key.pem",
+        )
+        ssl_options = pika.SSLOptions(context)
+    else:
+        ssl_options = None
+    connection_params = pika.ConnectionParameters(
+        host="localhost",
+        port=RABBITMQ_NODE_PORT,
+        heartbeat=0,
+        ssl_options=ssl_options,
+    )
+
+
 def publish_mq(queue, body):
     if RUN_ON_FLASK:
-        with pika.BlockingConnection(pika.ConnectionParameters(
-                host='localhost', port=RABBITMQ_NODE_PORT, heartbeat=0)) as connection:
+        with pika.BlockingConnection(connection_params) as connection:
             connection.channel().queue_declare(queue=queue)
-            connection.channel().basic_publish(exchange='',
-                                               routing_key=queue,
-                                               body=body)
+            connection.channel().basic_publish(
+                exchange="", routing_key=queue, body=body
+            )

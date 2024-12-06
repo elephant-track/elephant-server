@@ -14,6 +14,15 @@ echo "*** Log in the WebUI at port $RABBITMQ_MANAGEMENT_PORT (example: http://lo
 rabbitmq-plugins enable rabbitmq_management
 
 echo "management.tcp.port = $RABBITMQ_MANAGEMENT_PORT" > /etc/rabbitmq/rabbitmq.conf
+if [ "$RABBITMQ_USE_SSL" = "true" ]; then
+  echo "*** RabbitMQ use SSL: $RABBITMQ_USE_SSL. ***"
+  echo "listeners.ssl.default = $RABBITMQ_NODE_PORT" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.cacertfile = /etc/ssl/certs/ca_certificate.pem" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.certfile = /etc/ssl/certs/server_${RABBITMQ_USER}_certificate.pem" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.keyfile = /etc/ssl/certs/server_${RABBITMQ_USER}_key.pem" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.verify = $RABBITMQ_SSL_VERIFY" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.fail_if_no_peer_cert = $RABBITMQ_SSL_FAIL_IF_NO_PEER_CERT" >> /etc/rabbitmq/rabbitmq.conf
+fi
 
 # $@ is used to pass arguments to the rabbitmq-server command.
 # For example if you use it like this: docker run -d rabbitmq arg1 arg2,

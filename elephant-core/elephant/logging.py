@@ -36,7 +36,6 @@ RUN_ON_FLASK = "RUN_ON_FLASK" in os.environ
 
 RABBITMQ_NODE_PORT = int(os.environ.get("RABBITMQ_NODE_PORT", 5672))
 RABBITMQ_USE_SSL = os.environ.get("RABBITMQ_USE_SSL", "false").lower() == "true"
-RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "user")
 
 
 class RabbitMQHandler(logging.StreamHandler):
@@ -83,8 +82,8 @@ if RUN_ON_FLASK:
             cafile="/etc/ssl/mycerts/ca_certificate.pem"
         )
         context.load_cert_chain(
-            certfile=f"/etc/ssl/mycerts/client_{RABBITMQ_USER}_certificate.pem",
-            keyfile=f"/etc/ssl/mycerts/client_{RABBITMQ_USER}_key.pem",
+            certfile=f"/etc/ssl/mycerts/client_localhost_certificate.pem",
+            keyfile=f"/etc/ssl/mycerts/client_localhost_key.pem",
         )
         ssl_options = pika.SSLOptions(context)
     else:

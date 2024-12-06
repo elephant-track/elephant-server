@@ -18,8 +18,8 @@ if [ "$RABBITMQ_USE_SSL" = "true" ]; then
   echo "*** RabbitMQ use SSL: $RABBITMQ_USE_SSL. ***"
   echo "listeners.ssl.default = $RABBITMQ_NODE_PORT" >> /etc/rabbitmq/rabbitmq.conf
   echo "ssl_options.cacertfile = /etc/ssl/mycerts/ca_certificate.pem" >> /etc/rabbitmq/rabbitmq.conf
-  echo "ssl_options.certfile = /etc/ssl/mycerts/server_${RABBITMQ_USER}_certificate.pem" >> /etc/rabbitmq/rabbitmq.conf
-  echo "ssl_options.keyfile = /etc/ssl/mycerts/server_${RABBITMQ_USER}_key.pem" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.certfile = /etc/ssl/mycerts/server_localhost_certificate.pem" >> /etc/rabbitmq/rabbitmq.conf
+  echo "ssl_options.keyfile = /etc/ssl/mycerts/server_localhost_key.pem" >> /etc/rabbitmq/rabbitmq.conf
   echo "ssl_options.verify = $RABBITMQ_SSL_VERIFY" >> /etc/rabbitmq/rabbitmq.conf
   echo "ssl_options.fail_if_no_peer_cert = $RABBITMQ_SSL_FAIL_IF_NO_PEER_CERT" >> /etc/rabbitmq/rabbitmq.conf
 fi

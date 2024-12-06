@@ -15,6 +15,7 @@ echo "management.tcp.port = $RABBITMQ_MANAGEMENT_PORT" > /etc/rabbitmq/rabbitmq.
 if [ "$RABBITMQ_USE_SSL" = "true" ]; then
   echo "*** RabbitMQ use SSL: $RABBITMQ_USE_SSL. ***"
   bash /docker/tls-gen.sh
+  echo "listeners.tcp = none" >> /etc/rabbitmq/rabbitmq.conf
   echo "listeners.ssl.default = $RABBITMQ_NODE_PORT" > /etc/rabbitmq/rabbitmq.conf  # TLS用のポートを指定
   echo "ssl_options.cacertfile = /etc/ssl/mycerts/ca_certificate.pem" > /etc/rabbitmq/rabbitmq.conf
   echo "ssl_options.certfile = /etc/ssl/mycerts/server_localhost_certificate.pem" > /etc/rabbitmq/rabbitmq.conf

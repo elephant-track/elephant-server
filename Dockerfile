@@ -42,6 +42,7 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
 # install pypi packages
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN python -m pip install "tifffile<2022.4.22"
 # RUN pip install memory_profiler line_profiler
 # RUN pip install --no-deps stardist==0.8.3 csbdeep==0.7.2 numba==0.56.0 llvmlite==0.39.0 natsort==8.1.0
 

@@ -1324,7 +1324,7 @@ def export_ctc_labels(config, spots_dict):
             os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
             label[:, None] if n_dims == 3 else label,
             imagej=True,
-            compress=6,
+            compression=("zlib", 6),
         )
         timepoints.discard(t)
     # Save blank images for unlabeled frames
@@ -1334,7 +1334,7 @@ def export_ctc_labels(config, spots_dict):
             os.path.join(savedir, f'mask{t:0{digits}d}.tif'),
             label[:, None] if n_dims == 3 else label,
             imagej=True,
-            compress=6,
+            compression=("zlib", 6),
         )
     if is_zip:
         zip_path = shutil.make_archive('/tmp/archive', 'zip', savedir)

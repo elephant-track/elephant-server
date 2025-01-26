@@ -39,6 +39,10 @@ RUN groupadd -r nginx && useradd -r -g nginx nginx
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
+# install cuda-related modules
+RUN conda install -y -c nvidia cuda-nvcc=12.3
+RUN python -m pip install --no-deps nvidia-cudnn-cu12==8.9.2.26
+
 # install pypi packages
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt

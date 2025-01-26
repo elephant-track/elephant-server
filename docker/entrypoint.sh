@@ -20,6 +20,12 @@ export UWSGI_GID=user
 export MKL_THREADING_LAYER=GNU
 export GRPC_POLL_STRATEGY=epoll1
 
+CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn;print(nvidia.cudnn.__file__)"))
+CONDA_PREFIX=$(conda info --base)
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/:$CUDNN_PATH/lib:$LD_LIBRARY_PATH
+export XLA_FLAGS=--xla_gpu_cuda_data_dir=$CONDA_PREFIX
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+
 if [[ -z "${AS_LOCAL_USER}" ]]; then
   "$@"
 else

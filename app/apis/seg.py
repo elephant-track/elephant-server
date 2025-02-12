@@ -36,6 +36,8 @@ from flask import request
 from flask_restx import Namespace
 from flask_restx import Resource
 import numpy as np
+from stardist.models import Config3D
+from stardist.models import StarDist3D
 from tensorflow.data import TFRecordDataset
 from tensorflow.core.util import event_pb2
 import torch
@@ -48,7 +50,11 @@ from elephant.common import run_train_seg
 from elephant.config import SegmentationEvalConfig
 from elephant.config import SegmentationTrainConfig
 from elephant.config import ResetConfig
+from elephant.config import MODELS_DIR
+from elephant.config import STARDIST_MODELS_DIR
+from elephant.config import ZARR_STARDIST_LABELS
 from elephant.datasets import get_input_at
+from elephant.datasets import SegmentationDatasetZarr
 from elephant.logging import logger
 from elephant.logging import publish_mq
 from elephant.redis_util import get_state
@@ -72,10 +78,71 @@ INDICES_THRESHOLD = 100000  # indexing takes long time for long indices
 def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                    false_weight, model_path, n_epochs, keep_axials, scales,
                    lr, n_crops, is_3d, is_livemode, scale_factor_base,
-                   rotation_angle, contrast, zpath_input, zpath_seg_label,
+                   rotation_angle, contrast, zpath_input, zpath_label,
                    log_interval, log_dir, step_offset=0, epoch_start=0,
                    is_cpu=False, is_mixed_precision=True, cache_maxbytes=None,
                    memmap_dir=None, input_size=None):
+    if zpath_label.endswith(ZARR_STARDIST_LABELS):
+        n_dims = 2 + is_3d  # 3 or 2
+        if input_size is None:
+            input_size = zarr.open(zpath_input, mode='r').shape[-n_dims:]
+        dataset = SegmentationDatasetZarr(
+            zpath_input,
+            zpath_label,
+            spot_indices,
+            input_size,
+            crop_size,
+            n_crops,
+            keep_axials,
+            scales=scales,
+            is_livemode=is_livemode,
+            scale_factor_base=scale_factor_base,
+            rotation_angle=rotation_angle,
+            contrast=0,
+            cache_maxbytes=cache_maxbytes,
+            memmap_dir=memmap_dir,
+        )
+        eval_dataset = SegmentationDatasetZarr(
+            zpath_input,
+            zpath_label,
+            spot_indices,
+            input_size,
+            crop_size,
+            n_crops,
+            keep_axials,
+            scales=scales,
+            is_livemode=is_livemode,
+            scale_factor_base=scale_factor_base,
+            rotation_angle=rotation_angle,
+            contrast=0,
+            is_eval=True,
+            cache_maxbytes=cache_maxbytes,
+            memmap_dir=memmap_dir,
+        )
+        anisotropy = (2 ** sum(keep_axials), 1.0, 1.0)
+        conf = Config3D(
+            anisotropy=anisotropy,
+            train_batch_size=min(len(dataset), batch_size),
+            train_patch_size=crop_size,
+            train_epochs=n_epochs,
+            train_steps_per_epoch=max(1, len(dataset) // batch_size),
+        )
+        logger().info(conf)
+        p_model = Path(model_path)
+        model = StarDist3D(
+            conf,
+            name=p_model.stem,
+            basedir=str(p_model.parent).replace(MODELS_DIR, STARDIST_MODELS_DIR),
+        )
+        if (model.logdir / conf.train_checkpoint_last).exists():
+            logger().info(
+                f"Loading network weights from '{conf.train_checkpoint_last}'."
+            )
+            model.load_weights(conf.train_checkpoint_last)
+        X_trn, Y_trn = zip(*dataset)
+        X_val, Y_val = zip(*eval_dataset)
+        model.train(X_trn, Y_trn, validation_data=(X_val, Y_val))
+        return
     if not torch.cuda.is_available():
         is_cpu = True
     world_size = 2 if is_cpu else torch.cuda.device_count()
@@ -85,7 +152,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                        class_weights, false_weight, model_path, n_epochs,
                        keep_axials, scales, lr, n_crops, is_3d, is_livemode,
                        scale_factor_base, rotation_angle, contrast, zpath_input,
-                       zpath_seg_label, log_interval, log_dir, step_offset,
+                       zpath_label, log_interval, log_dir, step_offset,
                        epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
                        memmap_dir, input_size),
                  nprocs=world_size,
@@ -96,7 +163,7 @@ def train_seg_task(spot_indices, batch_size, crop_size, class_weights,
                       class_weights, false_weight, model_path, n_epochs,
                       keep_axials, scales, lr, n_crops, is_3d, is_livemode,
                       scale_factor_base, rotation_angle, contrast, zpath_input,
-                      zpath_seg_label, log_interval, log_dir, step_offset,
+                      zpath_label, log_interval, log_dir, step_offset,
                       epoch_start, is_cpu, is_mixed_precision, cache_maxbytes,
                       memmap_dir, input_size)
 
@@ -129,14 +196,22 @@ def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                         tuple(input_size))
 
 
-def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
-                       zpath_seg_label_vis, auto_bg_thresh=0, c_ratio=0.5,
-                       is_livemode=False, memmap_dir=None):
+def _update_seg_labels(spots_dict,
+                       scales,
+                       zpath_input,
+                       zpath_seg_label,
+                       zpath_seg_label_vis,
+                       zpath_stardist_label,
+                       auto_bg_thresh=0,
+                       c_ratio=0.5,
+                       is_livemode=False,
+                       memmap_dir=None,):
     if is_livemode:
         assert len(spots_dict.keys()) == 1
     za_input = zarr.open(zpath_input, mode='r')
     za_label = zarr.open(zpath_seg_label, mode='a')
     za_label_vis = zarr.open(zpath_seg_label_vis, mode='a')
+    za_stardist_label = zarr.open(zpath_stardist_label, mode='a')
     keyorder = ['tp', 'fp', 'tn', 'fn', 'tb', 'fb']
     MIN_AREA_ELLIPSOID = 9
     img_shape = za_input.shape[1:]
@@ -150,6 +225,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
         centroids = []
         label = np.zeros(img_shape, dtype='uint8')
         label_vis = np.zeros(img_shape + (3,), dtype='uint8')
+        stardist_label = np.zeros(img_shape, dtype='uint16')
         if 0 < auto_bg_thresh:
             indices_bg = np.nonzero(
                 get_input_at(
@@ -158,6 +234,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
             )
             label[indices_bg] = 1
             label_vis[indices_bg] = (255, 0, 0)
+            stardist_label[indices_bg] = 1
             if INDICES_THRESHOLD < len(indices_bg[0]):
                 label_indices = None
             else:
@@ -165,6 +242,7 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     tuple(map(tuple, np.array(indices_bg).T))
                 )
         cnt = collections.Counter({x: 0 for x in keyorder})
+        stardist_cnt = 2
         for spot in spots:
             if get_state() == TrainState.IDLE.value:
                 logger().info('update aborted')
@@ -227,6 +305,12 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     (0, label_vis_value, 0),
                     label_vis[indices_outer]
                 )
+                stardist_label[indices_outer] = np.where(
+                    cond_outer_1,
+                    stardist_cnt,
+                    stardist_label[indices_outer]
+                )
+                stardist_cnt += 1
                 label[indices_inner_p] = 2 + label_offset
                 label_vis[indices_inner_p] = (0, label_vis_value, 0)
                 cond_inner = np.fmod(label[indices_inner] - 1, 3) <= 2
@@ -263,6 +347,11 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                     (label_vis_value, 0, 0),
                     label_vis[indices_outer]
                 )
+                stardist_label[indices_outer] = np.where(
+                    cond_outer_0,
+                    1,
+                    stardist_label[indices_outer]
+                )
         logger().info('frame:{}, {}'.format(
             t, sorted(cnt.items(), key=lambda i: keyorder.index(i[0]))))
         if label_indices is None:
@@ -270,8 +359,11 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 chunk.unlink()
             for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
                 chunk.unlink()
+            for chunk in Path(za_stardist_label.store.path).glob(f'{t}.*'):
+                chunk.unlink()
             za_label[t] = label
             za_label_vis[t] = label_vis
+            za_stardist_label[t] = stardist_label
         else:
             target = tuple(np.array(list(label_indices)).T)
             target_t = to_fancy_index(t, *target)
@@ -289,12 +381,23 @@ def _update_seg_labels(spots_dict, scales, zpath_input, zpath_seg_label,
                 chunk.unlink()
             for chunk in Path(za_label_vis.store.path).glob(f'{t}.*'):
                 chunk.unlink()
+            for chunk in Path(za_stardist_label.store.path).glob(f'{t}.*'):
+                chunk.unlink()
             za_label[target_t] = label[target]
             za_label_vis[target_vis_t] = label_vis[target_vis]
+            za_stardist_label[target_t] = stardist_label[target]
         za_label.attrs[f'label.indices.{t}'] = centroids
         za_label.attrs['updated'] = True
+        za_stardist_label.attrs[f'label.indices.{t}'] = centroids
+        za_stardist_label.attrs['updated'] = True
         if memmap_dir:
             for fpath in Path(memmap_dir).glob(f'{keybase}-t{t}*-seglabel.dat'):
+                lock = FileLock(str(fpath) + '.lock')
+                with lock:
+                    if fpath.exists():
+                        logger().info(f'remove {fpath}')
+                        fpath.unlink()
+            for fpath in Path(memmap_dir).glob(f'{keybase}-t{t}*-stardistlabel.dat'):
                 lock = FileLock(str(fpath) + '.lock')
                 with lock:
                     if fpath.exists():
@@ -445,6 +548,7 @@ class Update(Resource):
                                               config.zpath_input,
                                               config.zpath_seg_label,
                                               config.zpath_seg_label_vis,
+                                              config.zpath_stardist_label,
                                               config.auto_bg_thresh,
                                               config.c_ratio,
                                               config.is_livemode,
@@ -506,6 +610,7 @@ class Train(Resource):
                                        config.zpath_input,
                                        config.zpath_seg_label,
                                        config.zpath_seg_label_vis,
+                                       config.zpath_stardist_label,
                                        config.auto_bg_thresh,
                                        config.c_ratio,
                                        memmap_dir=config.memmap_dir)
@@ -527,7 +632,7 @@ class Train(Resource):
                 config.keep_axials, config.scales, config.lr,
                 config.n_crops, config.is_3d, config.is_livemode,
                 config.scale_factor_base, config.rotation_angle,
-                config.contrast, config.zpath_input, config.zpath_seg_label,
+                config.contrast, config.zpath_input, config.zpath_stardist_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
                 config.is_cpu(), config.is_mixed_precision,
                 config.cache_maxbytes, config.memmap_dir, config.input_size,

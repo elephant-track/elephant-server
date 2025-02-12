@@ -40,6 +40,7 @@ import torch.utils.data as du
 if os.environ.get('CTC') != '1':
     import zarr
 
+from elephant.config import ZARR_STARDIST_LABELS
 from elephant.logging import logger
 from elephant.util import LRUCacheDict
 from elephant.util import normalize_zero_one
@@ -75,61 +76,61 @@ def _load_image(img, use_median=False, img_size=None):
     return img
 
 
-def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
-                        img_size=None):
+def _get_memmap_or_load_generic(za,
+                                timepoint,
+                                memmap_dir,
+                                use_median,
+                                img_size,
+                                key_suffix,
+                                dtype,
+                                mode,
+                                shape_func,
+                                load_func):
     if memmap_dir:
-        key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
-        fpath_org = Path(memmap_dir) / f'{key}.dat'
-        if img_size is not None:
-            key += '-' + '-'.join(map(str, img_size))
+        key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}{key_suffix}'
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
-            if not fpath_org.exists():
-                logger().info(f'creating {fpath_org}')
-                fpath_org.parent.mkdir(parents=True, exist_ok=True)
-                img_org = np.memmap(
-                    fpath_org,
-                    dtype='float32',
-                    mode='w+',
-                    shape=za.shape[1:]
-                )
-                img_org[:] = za[timepoint].astype('float32')
-            else:
-                img_org = np.memmap(
-                    fpath_org,
-                    dtype='float32',
-                    mode='c',
-                    shape=za.shape[1:]
-                )
             if not fpath.exists():
                 logger().info(f'creating {fpath}')
                 fpath.parent.mkdir(parents=True, exist_ok=True)
-                img = np.memmap(
+                np.memmap(
                     fpath,
-                    dtype='float32',
+                    dtype=dtype,
                     mode='w+',
-                    shape=img_size
-                )
-                img[:] = _load_image(
-                    img_org,
-                    use_median=use_median,
-                    img_size=img_size,
-                )
+                    shape=shape_func()
+                )[:] = load_func()
             logger().info(f'loading from {fpath}')
             return np.memmap(
                 fpath,
-                dtype='float32',
+                dtype=dtype,
                 mode='c',
-                shape=za.shape[1:] if img_size is None else img_size
+                shape=shape_func()
             )
-    else:
-        img = _load_image(
+    return load_func()
+
+
+def _get_memmap_or_load(za,
+                        timepoint,
+                        memmap_dir=None,
+                        use_median=False,
+                        img_size=None):
+    return _get_memmap_or_load_generic(
+        za,
+        timepoint,
+        memmap_dir,
+        use_median,
+        img_size,
+        '',
+        'float32',
+        'c',
+        lambda: za.shape[1:] if img_size is None else img_size,
+        lambda: _load_image(
             za[timepoint].astype('float32'),
             use_median=use_median,
             img_size=img_size,
         )
-    return img
+    )
 
 
 def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
@@ -467,6 +468,8 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
         self.n_crops = n_crops
         self.is_ae = is_ae
 
+        self.is_stardist = zpath_seg_label.endswith(ZARR_STARDIST_LABELS)
+
         if is_ae:
             self.is_eval = False
             self.is_livemode = False
@@ -504,50 +507,64 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
             return self.n_crops
         return len(self.indices) * self.n_crops
 
+    def _get_memmap_or_load_stardist_label(self, timepoint, img_size=None):
+        return _get_memmap_or_load_generic(
+            self.za_label,
+            timepoint,
+            self.memmap_dir,
+            False,
+            img_size,
+            '-stardistlabel',
+            'uint16',
+            'c',
+            lambda: self.za_label.shape[1:] if img_size is None else img_size,
+            lambda: self.za_label[timepoint] if img_size is None else
+            F.interpolate(
+                torch.from_numpy(self.za_label[timepoint])[None, None].float(),
+                size=img_size,
+                mode='nearest',
+            )[0, 0].numpy()
+        )
+
     def _get_memmap_or_load_label(self, timepoint, img_size=None):
-        if self.memmap_dir:
-            key = f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
-            if img_size is not None:
-                key += '-' + '-'.join(map(str, img_size))
-            key += '-seglabel'
-            fpath = Path(self.memmap_dir) / f'{key}.dat'
-            lock = FileLock(str(fpath) + '.lock')
-            with lock:
-                if not fpath.exists():
-                    logger().info(f'creating {fpath}')
-                    fpath.parent.mkdir(parents=True, exist_ok=True)
-                    np.memmap(
-                        fpath,
-                        dtype='uint8',
-                        mode='w+',
-                        shape=(self.za_label.shape[1:] if img_size is None
-                               else img_size)
-                    )[:] = (
-                        self.za_label[timepoint] if img_size is None else
-                        F.interpolate(
-                            torch.from_numpy(
-                                self.za_label[timepoint]
-                            )[None, None],
-                            size=img_size,
-                            mode='nearest',
-                        )[0, 0].numpy()
-                    )
-                logger().info(f'loading from {fpath}')
-                return np.memmap(
-                    fpath,
-                    dtype='uint8',
-                    mode='c',
-                    shape=(self.za_label.shape[1:] if img_size is None
-                           else img_size)
-                )
-        return (
-            self.za_label[timepoint] if img_size is None else
+        return _get_memmap_or_load_generic(
+            self.za_label,
+            timepoint,
+            self.memmap_dir,
+            False,
+            img_size,
+            '-seglabel',
+            'uint8',
+            'c',
+            lambda: self.za_label.shape[1:] if img_size is None else img_size,
+            lambda: self.za_label[timepoint] if img_size is None else
             F.interpolate(
                 torch.from_numpy(self.za_label[timepoint])[None, None],
                 size=img_size,
                 mode='nearest',
             )[0, 0].numpy()
         )
+
+    def _get_stardist_at(self, ind, img_size=None):
+        if self.use_cache:
+            if RUN_ON_FLASK:
+                za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+                if za_label_a.attrs.get('updated', False):
+                    self.cache_dict_label.clear()
+                    za_label_a.attrs['updated'] = False
+            key = f'{self.za_label.store.path}-t{ind}'
+            if img_size is not None:
+                key += '-' + '-'.join(map(str, img_size))
+            key += '-stardistlabel'
+            cache = self.cache_dict_label.get(key)
+            if cache is None:
+                label = self._get_memmap_or_load_stardist_label(ind, img_size)
+                assert 0 < label.max(), 'positive weight should exist in the label'
+                cache = self.cache_dict_label.get(key, label)
+            return cache
+        label = self._get_memmap_or_load_stardist_label(ind, img_size)
+        assert 0 < label.max(), 'positive weight should exist in the label'
+        return label
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
@@ -563,15 +580,11 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
             cache = self.cache_dict_label.get(key)
             if cache is None:
                 label = self._get_memmap_or_load_label(ind, img_size)
-                assert 0 < label.max(), (
-                    'positive weight should exist in the label'
-                )
+                assert 0 < label.max(), 'positive weight should exist in the label'
                 cache = self.cache_dict_label.get(key, label)
             return cache
         label = self._get_memmap_or_load_label(ind, img_size)
-        assert 0 < label.max(), (
-            'positive weight should exist in the label'
-        )
+        assert 0 < label.max(), 'positive weight should exist in the label'
         return label
 
     def __getitem__(self, index):
@@ -587,12 +600,16 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
         if self.is_ae:
             i_frame = randrange(self.za_input.shape[0])
         else:
+            if self.is_stardist:
+                label_func = self._get_stardist_at
+            else:
+                label_func = self._get_label_at
             if self.is_livemode:
                 while True:
                     v = redis_client.get(REDIS_KEY_TIMEPOINT)
                     if v is not None:
                         i_frame = int(v)
-                        img_label = self._get_label_at(i_frame, self.img_size)
+                        img_label = label_func(i_frame, self.img_size)
                         break
                     if (get_state() == TrainState.IDLE.value):
                         raise KeyboardInterrupt
@@ -604,7 +621,7 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
                     i_frame = np.random.choice(self.indices)
                 else:
                     i_frame = self.indices[index // self.n_crops]
-                img_label = self._get_label_at(i_frame, self.img_size)
+                img_label = label_func(i_frame, self.img_size)
         img_input = get_input_at(self.za_input, i_frame, self.cache_dict_input,
                                  self.memmap_dir, img_size=self.img_size)
         self.i_frame = i_frame
@@ -614,7 +631,14 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
         else:
             self.resize_factor = [1, ] * img_input.ndim
 
-        return super()._generate_item(img_input, img_label, self.crop_size)
+        item = super()._generate_item(img_input, img_label, self.crop_size)
+        if self.is_stardist:
+            return (
+                np.moveaxis(item[0][0].numpy(), 0, -1),
+                item[1].numpy().astype(np.int16),
+            )
+        else:
+            return item
 
 
 class SegmentationDatasetNumpy(SegmentationDatasetBase):
@@ -801,46 +825,21 @@ class FlowDatasetZarr(du.Dataset):
             return self.length
         return len(self.indices) * self.n_crops
 
-    def _get_memmap_or_load_label(self, timepoint, img_size=None):
-        if self.memmap_dir:
-            key = f'{Path(self.za_label.store.path).parent.name}-t{timepoint}'
-            if img_size is not None:
-                key += '-' + '-'.join(map(str, img_size))
-            key += '-flowlabel'
-            fpath = Path(self.memmap_dir) / f'{key}.dat'
-            lock = FileLock(str(fpath) + '.lock')
-            shape = (self.n_dims + 1, ) + (
-                self.za_label.shape[-self.n_dims:] if img_size is None
-                else img_size)
-            with lock:
-                if not fpath.exists():
-                    logger().info(f'creating {fpath}')
-                    fpath.parent.mkdir(parents=True, exist_ok=True)
-                    np.memmap(
-                        fpath,
-                        dtype='float32',
-                        mode='w+',
-                        shape=shape,
-                    )[:] = (
-                        self.za_label[timepoint] if img_size is None else
-                        F.interpolate(
-                            torch.from_numpy(
-                                self.za_label[timepoint]
-                            )[None],
-                            size=img_size,
-                            mode='nearest',
-                        )[0].numpy()
-                    )
-                logger().info(f'loading from {fpath}')
-                return np.memmap(
-                    fpath,
-                    dtype='float32',
-                    mode='c',
-                    shape=shape,
-                )
-        return (
-            self.za_label[timepoint] if img_size is None else
-            F.interpolate(
+    def _get_memmap_or_load_flow_label(self, timepoint, img_size=None):
+        return _get_memmap_or_load_generic(
+            self.za_label,
+            timepoint,
+            self.memmap_dir,
+            False,
+            img_size,
+            '-flowlabel',
+            'float32',
+            'c',
+            lambda: (self.n_dims + 1,) + (
+                self.za_label.shape[-self.n_dims:] if img_size is None else img_size
+            ),
+            lambda: self.za_label[timepoint] if img_size is None
+            else F.interpolate(
                 torch.from_numpy(self.za_label[timepoint])[None],
                 size=img_size,
                 mode='nearest',
@@ -859,16 +858,12 @@ class FlowDatasetZarr(du.Dataset):
             key += '-flowlabel'
             cache = self.cache_dict_label.get(key)
             if cache is None:
-                label = self._get_memmap_or_load_label(ind, img_size)
-                assert 0 < label[-1].max(), (
-                    'positive weight should exist in the label'
-                )
+                label = self._get_memmap_or_load_flow_label(ind, img_size)
+                assert 0 < label[-1].max(), 'positive weight should exist in the label'
                 cache = self.cache_dict_label.get(key, label)
             return cache
-        label = self._get_memmap_or_load_label(ind, img_size)
-        assert 0 < label[-1].max(), (
-            'positive weight should exist in the label'
-        )
+        label = self._get_memmap_or_load_flow_label(ind, img_size)
+        assert 0 < label[-1].max(), 'positive weight should exist in the label'
         return label
 
     @profile

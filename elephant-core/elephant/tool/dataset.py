@@ -148,6 +148,12 @@ def generate_dataset(input, output, is_uint16=False, divisor=1., is_2d=False,
         dtype='f2'
     )
     zarr.open(
+        str(p / 'stardist_labels.zarr'),
+        'w',
+        shape=(n_timepoints,) + shape,
+        chunks=(1,) + chunk_shape, dtype='u2'
+    )
+    zarr.open(
         str(p / 'seg_labels.zarr'),
         'w',
         shape=(n_timepoints,) + shape,
@@ -245,24 +251,34 @@ def check_dataset(dataset, shape):
                             f'Expected: {shape} Found: {img.shape}')
         n_dims = len(shape) - 1
         n_timepoints = shape[0]
-        _check_zarr(p / 'flow_outputs.zarr',
-                    (n_timepoints - 1, n_dims,) + shape[-n_dims:],
-                    'float16')
-        _check_zarr(p / 'flow_hashes.zarr',
-                    (n_timepoints - 1,),
-                    'S16')
-        _check_zarr(p / 'flow_labels.zarr',
-                    (n_timepoints - 1, n_dims + 1,) + shape[-n_dims:],
-                    'float32')
-        _check_zarr(p / 'seg_outputs.zarr',
-                    (n_timepoints,) + shape[-n_dims:] + (3,),
-                    'float16')
-        _check_zarr(p / 'seg_labels.zarr',
-                    (n_timepoints,) + shape[-n_dims:],
-                    'uint8')
-        _check_zarr(p / 'seg_labels_vis.zarr',
-                    (n_timepoints,) + shape[-n_dims:] + (3,),
-                    'uint8')
+        _check_and_create_zarr(p / 'flow_outputs.zarr',
+                               (n_timepoints - 1, n_dims,) + shape[-n_dims:],
+                               np.dtype('float16'),
+                               (1, 1,) + img.chunks[-n_dims:])
+        _check_and_create_zarr(p / 'flow_hashes.zarr',
+                               (n_timepoints - 1,),
+                               np.dtype('S16'),
+                               (n_timepoints - 1,))
+        _check_and_create_zarr(p / 'flow_labels.zarr',
+                               (n_timepoints - 1, n_dims + 1,) + shape[-n_dims:],
+                               np.dtype('float32'),
+                               (1, 1,) + img.chunks[-n_dims:])
+        _check_and_create_zarr(p / 'seg_outputs.zarr',
+                               (n_timepoints,) + shape[-n_dims:] + (3,),
+                               np.dtype('float16'),
+                               (1,) + img.chunks[-n_dims:] + (1,))
+        _check_and_create_zarr(p / 'stardist_labels.zarr',
+                               (n_timepoints,) + shape[-n_dims:],
+                               np.dtype('uint16'),
+                               (1,) + img.chunks[-n_dims:])
+        _check_and_create_zarr(p / 'seg_labels.zarr',
+                               (n_timepoints,) + shape[-n_dims:],
+                               np.dtype('uint8'),
+                               (1,) + img.chunks[-n_dims:])
+        _check_and_create_zarr(p / 'seg_labels_vis.zarr',
+                               (n_timepoints,) + shape[-n_dims:] + (3,),
+                               np.dtype('uint8'),
+                               (1,) + img.chunks[-n_dims:] + (1,))
     except Exception as e:
         logger().info(str(e))
         message = str(e)
@@ -279,3 +295,17 @@ def _check_zarr(zarr_path, shape, dtype):
                         f'Expected: {shape} Found: {za.shape}')
     if za.dtype != dtype:
         raise Exception(f'Invalid dtype for {zarr_path.name}')
+
+
+def _check_and_create_zarr(zarr_path, shape, dtype, chunks):
+    try:
+        _check_zarr(zarr_path, shape, dtype)
+    except Exception:
+        logger().info(f'creating {zarr_path}.')
+        zarr.open(
+            str(zarr_path),
+            'w',
+            shape=shape,
+            chunks=chunks,
+            dtype=dtype,
+        )

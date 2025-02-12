@@ -43,6 +43,8 @@ from skimage.filters import gaussian
 from skimage.filters import prewitt
 import skimage.io
 import skimage.measure
+from stardist.models import Config3D
+from stardist.models import StarDist3D
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -53,6 +55,8 @@ if os.environ.get('CTC') != '1':
     import torch.utils.tensorboard as tb
     import zarr
 
+from elephant.config import MODELS_DIR
+from elephant.config import STARDIST_MODELS_DIR
 from elephant.datasets import AutoencoderDatasetZarr
 from elephant.datasets import get_input_at
 from elephant.datasets import get_inputs_at
@@ -956,13 +960,105 @@ def _find_and_push_spots(spots, i_frame, c_probs, scales=None, c_ratio=0.4,
     logger().info(f'{len(spots)} detections kept')
 
 
-def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
-                 is_3d=True, crop_size=(16, 384, 384), scales=None,
-                 cache_maxbytes=None, use_2d=False, use_median=False,
-                 patch_size=None, crop_box=None, c_ratio=0.4, p_thresh=0.5,
-                 r_min=0, r_max=1e6, output_prediction=False, zpath_input=None,
-                 zpath_seg_output=None, timepoint=None, tiff_input=None,
-                 memmap_dir=None, batch_size=1, input_size=None):
+def predict_original(img_input,
+                     device,
+                     model_path,
+                     keep_axials=(True,) * 4,
+                     is_pad=False,
+                     is_3d=True,
+                     crop_size=(16, 384, 384),
+                     scales=None,
+                     cache_maxbytes=None,
+                     use_2d=False,
+                     patch_size=None,
+                     crop_box=None,
+                     zpath_input=None,
+                     memmap_dir=None,
+                     batch_size=1,
+                     ):
+    models = load_seg_models(model_path,
+                             keep_axials,
+                             device,
+                             is_eval=True,
+                             is_pad=is_pad,
+                             is_3d=is_3d,
+                             zpath_input=zpath_input,
+                             crop_size=crop_size,
+                             scales=scales,
+                             cache_maxbytes=cache_maxbytes)
+    if len(img_input.shape) == 3 and use_2d:
+        prediction = np.swapaxes(np.array([
+            _get_seg_prediction(img_input[z][None, None],
+                                models,
+                                keep_axials,
+                                device,
+                                patch_size[-2:],
+                                crop_box,
+                                batch_size=batch_size,
+                                memmap_dir=memmap_dir)
+            for z in range(img_input.shape[0])
+        ]), 0, 1)
+    else:
+        prediction = _get_seg_prediction(img_input[None, None],
+                                         models,
+                                         keep_axials,
+                                         device,
+                                         patch_size,
+                                         crop_box,
+                                         batch_size=batch_size,
+                                         memmap_dir=memmap_dir)
+    return prediction
+
+
+def predict_stardist(img_input,
+                     model_path,
+                     keep_axials=(True,) * 4,
+                     ):
+    p_model = Path(model_path)
+    anisotropy = (2 ** sum(keep_axials), 1.0, 1.0)
+    conf = Config3D(
+        anisotropy=anisotropy,
+    )
+    logger().info(f'loading model from {p_model}')
+    model = StarDist3D(
+        conf,
+        name=p_model.stem,
+        basedir=str(p_model.parent).replace(MODELS_DIR, STARDIST_MODELS_DIR),
+    )
+    if (model.logdir / conf.train_checkpoint_last).exists():
+        logger().info(
+            f"Loading network weights from '{conf.train_checkpoint_last}'."
+        )
+        model.load_weights(conf.train_checkpoint_last)
+    labels, _ = model.predict_instances(img_input)
+    return labels
+
+
+def detect_spots(device,
+                 model_path,
+                 keep_axials=(True,) * 4,
+                 is_pad=False,
+                 is_3d=True,
+                 crop_size=(16, 384, 384),
+                 scales=None,
+                 cache_maxbytes=None,
+                 use_2d=False,
+                 use_median=False,
+                 patch_size=None,
+                 crop_box=None,
+                 c_ratio=0.4,
+                 p_thresh=0.5,
+                 r_min=0,
+                 r_max=1e6,
+                 output_prediction=False,
+                 zpath_input=None,
+                 zpath_seg_output=None,
+                 timepoint=None,
+                 tiff_input=None,
+                 memmap_dir=None,
+                 batch_size=1,
+                 input_size=None,
+                 mode="original"):
     use_median = use_median and is_3d
     n_dims = 2 + is_3d
     resize_factor = [1, ] * n_dims
@@ -1007,44 +1103,35 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                 crop_box[2-d] = int(crop_box[2-d] * resize_factor[-(1+d)])
                 crop_box[5-d] = int(crop_box[5-d] * resize_factor[-(1+d)])
     try:
-        models = load_seg_models(model_path,
-                                 keep_axials,
-                                 device,
-                                 is_eval=True,
-                                 is_pad=is_pad,
-                                 is_3d=is_3d,
-                                 zpath_input=zpath_input,
-                                 crop_size=crop_size,
-                                 scales=scales,
-                                 cache_maxbytes=cache_maxbytes)
-        if len(img_input.shape) == 3 and use_2d:
-            prediction = np.swapaxes(np.array([
-                _get_seg_prediction(img_input[z][None, None],
-                                    models,
-                                    keep_axials,
-                                    device,
-                                    patch_size[-2:],
-                                    crop_box,
-                                    batch_size=batch_size,
-                                    memmap_dir=memmap_dir)
-                for z in range(img_input.shape[0])
-            ]), 0, 1)
-        else:
-            prediction = _get_seg_prediction(img_input[None, None],
-                                             models,
-                                             keep_axials,
-                                             device,
-                                             patch_size,
-                                             crop_box,
-                                             batch_size=batch_size,
-                                             memmap_dir=memmap_dir)
+        if mode == "original":
+            prediction = predict_original(img_input,
+                                          device,
+                                          model_path,
+                                          keep_axials,
+                                          is_pad,
+                                          is_3d,
+                                          crop_size,
+                                          scales,
+                                          cache_maxbytes,
+                                          use_2d,
+                                          patch_size,
+                                          crop_box,
+                                          zpath_input,
+                                          memmap_dir,
+                                          batch_size)
+            labels = prediction[..., -1]
+        elif mode == "stardist":
+            labels = predict_stardist(img_input,
+                                      model_path,
+                                      keep_axials)
+            c_ratio = 1.0
 
         # calculate spots
         spots = []
         _find_and_push_spots(spots,
                              timepoint,
                              # last channel is the center label
-                             prediction[-1],
+                             labels,
                              scales,
                              c_ratio=c_ratio,
                              p_thresh=p_thresh,

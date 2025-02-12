@@ -35,11 +35,13 @@ from elephant.util import get_device
 
 DATASETS_DIR = '/workspace/datasets'
 MODELS_DIR = '/workspace/models'
+STARDIST_MODELS_DIR = '/workspace/stardist_models'
 LOGS_DIR = '/workspace/logs'
 MEMMAPS_DIR = '/workspace/memmaps'
 
 ZARR_INPUT = 'imgs.zarr'
 ZARR_SEG_OUTPUT = 'seg_outputs.zarr'
+ZARR_STARDIST_LABELS = 'stardist_labels.zarr'
 ZARR_SEG_LABELS = 'seg_labels.zarr'
 ZARR_SEG_LABELS_VIS = 'seg_labels_vis.zarr'
 ZARR_FLOW = 'flow_outputs.zarr'
@@ -194,6 +196,9 @@ class SegmentationTrainConfig(SegmentationEvalConfig):
         if config.get('log_dir') is not None:
             self.log_dir = os.path.join(LOGS_DIR, config.get('log_dir'))
         if self.dataset_name is not None:
+            self.zpath_stardist_label = os.path.join(DATASETS_DIR,
+                                                     self.dataset_name,
+                                                     ZARR_STARDIST_LABELS)
             self.zpath_seg_label = os.path.join(DATASETS_DIR,
                                                 self.dataset_name,
                                                 ZARR_SEG_LABELS)

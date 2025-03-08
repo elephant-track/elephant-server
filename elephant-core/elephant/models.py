@@ -232,7 +232,7 @@ class UNet(nn.Module):
     def three_class_segmentation(cls, is_eval=False, device=None,
                                  state_dict=None, is_decoder_only=False,
                                  is_pad=False, is_3d=True):
-        model = cls(1, 3, final_activation=torch.nn.LogSoftmax(
+        model = cls(2, 3, final_activation=torch.nn.LogSoftmax(
             dim=1), is_pad=is_pad, is_3d=is_3d)
         if state_dict:
             model.load_state_dict(state_dict)

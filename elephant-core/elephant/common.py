@@ -1185,7 +1185,7 @@ def predict_original(
         scales=scales,
         cache_maxbytes=cache_maxbytes,
     )
-    if len(img_input.shape) == 3 and use_2d:
+    if len(img_input.shape) == 4 and use_2d:
         prediction = np.swapaxes(
             np.array(
                 [
@@ -1207,7 +1207,7 @@ def predict_original(
         )
     else:
         prediction = _get_seg_prediction(
-            img_input[None, None],
+            img_input[None],
             models,
             keep_axials,
             device,
@@ -1295,7 +1295,7 @@ def detect_spots(
     elif zpath_input is not None:
         za_input = zarr.open(zpath_input, mode="r")
         img_input = get_inputs_at(
-            za_input, timepoint - 1, memmap_dir=memmap_dir, img_size=input_size
+            za_input, timepoint, memmap_dir=memmap_dir, img_size=input_size
         )
         if input_size is not None and za_input.shape[-n_dims:] != input_size:
             original_size = za_input.shape[-n_dims:]
@@ -1329,7 +1329,7 @@ def detect_spots(
                 memmap_dir,
                 batch_size,
             )
-            labels = prediction[..., -1]
+            labels = prediction[-1]
         elif mode == "stardist":
             labels = predict_stardist(img_input, model_path, keep_axials)
             c_ratio = 1.0

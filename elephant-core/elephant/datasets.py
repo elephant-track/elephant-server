@@ -247,6 +247,9 @@ class SegmentationDatasetBase(du.Dataset):
         self.keep_axials = torch.tensor(keep_axials)
 
     def _generate_item(self, img_input, img_label, crop_size):
+        """
+        img_input: (C, D, H, W) or (C, H, W)
+        """
         if self.is_eval:
             tensor_input = torch.from_numpy(img_input[None])
             tensor_label = torch.from_numpy(img_label).long()
@@ -257,11 +260,11 @@ class SegmentationDatasetBase(du.Dataset):
                 item_crop_size = [
                     randrange(
                         min(
-                            img_input.shape[i],
+                            img_input.shape[-self.n_dims + i],
                             round(crop_size[i] * (1.0 - self.scale_factors[i])),
                         ),
                         min(
-                            img_input.shape[i] + 1,
+                            img_input.shape[-self.n_dims + i] + 1,
                             int(crop_size[i] * (1.0 + self.scale_factors[i])) + 1,
                         ),
                     )
@@ -279,7 +282,7 @@ class SegmentationDatasetBase(du.Dataset):
                     item_crop_size[i] *= abs(cos_theta) + abs(sin_theta)
                     item_crop_size[i] = math.ceil(item_crop_size[i])
                 item_crop_size = [
-                    min(img_input.shape[i], item_crop_size[i])
+                    min(img_input.shape[-self.n_dims + i], item_crop_size[i])
                     for i in range(self.n_dims)
                 ]
 
@@ -296,7 +299,7 @@ class SegmentationDatasetBase(du.Dataset):
                 index_pool = np.argwhere(0 < img_label)
             if self.is_ae:
                 origins = [
-                    randint(0, img_input.shape[i] - item_crop_size[i])
+                    randint(0, img_input.shape[-self.n_dims + i] - item_crop_size[i])
                     for i in range(self.n_dims)
                 ]
             else:
@@ -311,7 +314,7 @@ class SegmentationDatasetBase(du.Dataset):
                             ),
                         ),
                         min(
-                            (img_input.shape[i] - item_crop_size[i]),
+                            (img_input.shape[-self.n_dims + i] - item_crop_size[i]),
                             int(base_index[i] * self.resize_factor[i]),
                         ),
                     )
@@ -323,41 +326,39 @@ class SegmentationDatasetBase(du.Dataset):
             )
             if not self.is_ae:
                 sliced_label = img_label[slices].copy()
-            sliced_input = img_input[slices].copy()
-
-            if not self.is_ae and 0 < self.contrast:
-                fg_index = np.isin(sliced_label, (2, 3, 5, 6))
-                bg_index = np.isin(sliced_label, (1, 4))
-                if fg_index.any() and bg_index.any():
-                    fg_mean = sliced_input[fg_index].mean()
-                    bg_mean = sliced_input[bg_index].mean()
-                    cr_factor = (
-                        (fg_mean - bg_mean) * uniform(self.contrast, 1) + bg_mean
-                    ) / fg_mean
-                    sliced_input[fg_index] *= cr_factor
+            sliced_input = img_input[(slice(None),) + slices].copy()
 
             if self.rotation_angle is not None and 0 < self.rotation_angle:
                 if self.n_dims == 3:
                     sliced_input = np.array(
                         [
+                            [
+                                rotate(
+                                    sliced_input[c, z],
+                                    theta,
+                                    resize=True,
+                                    preserve_range=True,
+                                    order=1,  # 1: Bi-linear (default)
+                                )
+                                for z in range(sliced_input.shape[1])
+                            ]
+                            for c in range(sliced_input.shape[0])
+                        ]
+                    )
+                else:
+                    sliced_input = np.array(
+                        [
                             rotate(
-                                sliced_input[z],
+                                sliced_input[c],
                                 theta,
                                 resize=True,
                                 preserve_range=True,
                                 order=1,  # 1: Bi-linear (default)
                             )
-                            for z in range(sliced_input.shape[0])
+                            for c in range(sliced_input.shape[0])
                         ]
                     )
-                else:
-                    sliced_input = rotate(
-                        sliced_input,
-                        theta,
-                        resize=True,
-                        preserve_range=True,
-                        order=1,  # 1: Bi-linear (default)
-                    )
+                            
                 h_crop, w_crop = crop_size[-2:]
                 h_rotate, w_rotate = sliced_input.shape[-2:]
                 r_origin = max(0, (h_rotate - h_crop) // 2)
@@ -396,7 +397,7 @@ class SegmentationDatasetBase(du.Dataset):
                         continue
             break
 
-        tensor_input = torch.from_numpy(sliced_input)[None]
+        tensor_input = torch.from_numpy(sliced_input)
         if not self.is_ae:
             tensor_label = torch.from_numpy(sliced_label)
         if tensor_input.shape[1:] != crop_size:

@@ -632,7 +632,7 @@ class Train(Resource):
                 config.keep_axials, config.scales, config.lr,
                 config.n_crops, config.is_3d, config.is_livemode,
                 config.scale_factor_base, config.rotation_angle,
-                config.contrast, config.zpath_input, config.zpath_stardist_label,
+                config.contrast, config.zpath_input, config.zpath_seg_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
                 config.is_cpu(), config.is_mixed_precision,
                 config.cache_maxbytes, config.memmap_dir, config.input_size,

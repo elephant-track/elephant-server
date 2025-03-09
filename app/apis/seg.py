@@ -193,7 +193,7 @@ def detect_spots_task(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                         patch_size, crop_box, c_ratio, p_thresh, r_min, r_max,
                         output_prediction, zpath_input, zpath_seg_output,
                         timepoint, tiff_input, memmap_dir, batch_size,
-                        tuple(input_size))
+                        tuple(input_size), mode="stardist")
 
 
 def _update_seg_labels(spots_dict,
@@ -625,6 +625,14 @@ class Train(Resource):
                 except Exception:
                     pass
             epoch_start = 0
+            req_json["mode"] = "stardist"
+            mode = req_json.get('mode', 'original')
+            if mode == "original":
+                zpath_label = config.zpath_seg_label
+            elif mode == "stardist":
+                zpath_label = config.zpath_stardist_label
+            else:
+                raise ValueError("mode should be 'original' or 'stardist'")
             async_result = train_seg_task.delay(
                 list(spots_dict.keys()), config.batch_size,
                 config.crop_size, config.class_weights,
@@ -632,7 +640,7 @@ class Train(Resource):
                 config.keep_axials, config.scales, config.lr,
                 config.n_crops, config.is_3d, config.is_livemode,
                 config.scale_factor_base, config.rotation_angle,
-                config.contrast, config.zpath_input, config.zpath_stardist_label,
+                config.contrast, config.zpath_input, zpath_label,
                 config.log_interval, config.log_dir, step_offset, epoch_start,
                 config.is_cpu(), config.is_mixed_precision,
                 config.cache_maxbytes, config.memmap_dir, config.input_size,

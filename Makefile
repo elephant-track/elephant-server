@@ -36,19 +36,16 @@ stop:
 	fi
 
 warmup:
-	$(eval GPU_ARG:=$(shell \
-	if [ -n "$(ELEPHANT_NVIDIA_GID)" ] && [ -n "$(ELEPHANT_GPU)" ]; then \
-		VAR=$$(echo --gpus '"device=$(ELEPHANT_GPU)"'); \
-	fi;\
-	echo $$VAR))
-	@if [ -n "$(GPU_ARG)" ]; then \
-		$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) $(ELEPHANT_IMAGE_NAME) echo "warming up GPU..."; \
-	else \
-		echo "CPU mode..."; \
-	fi
+    $(eval GPU_ARG:=$(shell \
+    if [ -n "$(ELEPHANT_NVIDIA_GID)" ] && [ -n "$(ELEPHANT_GPU)" ]; then \
+        VAR="--gpus device=$(ELEPHANT_GPU)"; \
+    else \
+        VAR="--gpus all"; \
+    fi; \
+    echo $$VAR))
 
 launch: warmup
-	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
+	$(ELEPHANT_DOCKER) run -it --rm $(GPU_ARG) --gpus all --shm-size=8g -v $(ELEPHANT_WORKSPACE):/workspace \
 	-p $(ELEPHANT_HTTP_PORT):$(ELEPHANT_HTTP_PORT) \
 	-p $(ELEPHANT_RABBITMQ_NODE_PORT):$(ELEPHANT_RABBITMQ_NODE_PORT) \
 	-p $(ELEPHANT_RABBITMQ_MANAGEMENT_PORT):$(ELEPHANT_RABBITMQ_MANAGEMENT_PORT) \

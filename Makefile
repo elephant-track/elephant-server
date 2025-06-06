@@ -64,6 +64,8 @@ launch: warmup
 	-e ELEPHANT_REDIS_PORT=$(ELEPHANT_REDIS_PORT) \
 	-e ELEPHANT_HTTP_PORT=$(ELEPHANT_HTTP_PORT) \
 	-e ELEPHANT_BATCH_ID=$(ELEPHANT_BATCH_ID) \
+	-e XLA_PYTHON_CLIENT_PREALLOCATE=false \
+	-e XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false --xla_gpu_force_compilation_parallelism=1" \
 	$(ELEPHANT_IMAGE_NAME)
 
 bash: warmup

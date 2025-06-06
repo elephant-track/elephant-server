@@ -1,0 +1,29 @@
+{
+    "device": "cuda",
+    "patch": [
+        192,
+        192,
+        192
+    ],
+    "crop_size": [
+        16,
+        384,
+        384
+    ],
+    "lr": 5e-3,
+    "n_crops": 10,
+    "evalinterval": -1,
+    "train_length": 10,
+    "eval_length": 5,
+    "n_epochs": 100,
+    "auto_bg_thresh": 0,
+    "aug_scale_factor_base": 0,
+    "aug_rotation_angle": 0,
+    "aug_contrast": 0,
+    "is_3d": true,
+    "batch_size": 20,
+    "nmodels": 1,
+    "model_name": "PH_division_detection.pth",
+    "log_dir": "PH_division_detection",
+    "epoch_start": 0
+}

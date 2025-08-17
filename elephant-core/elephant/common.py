@@ -722,19 +722,18 @@ def predict(model, device, input, keep_axials, patch_size=None,
     return prediction
 
 
-def _get_prediction(img, models, keep_axials, device, is_logarithm,
-                    patch_size=None, crop_box=None, is_logging=True,
-                    batch_size=1, memmap_dir=None):
+def _get_prediction(img,
+                    models,
+                    keep_axials,
+                    device,
+                    is_logarithm,
+                    patch_size=None,
+                    is_logging=True,
+                    batch_size=1,
+                    memmap_dir=None):
     """
     input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
     """
-    if crop_box is not None:
-        slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
-                  slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
-        if img.ndim == 5:  # Z
-            slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
-        slices = (slice(None), slice(None)) + slices
-        img = img[slices]
     with torch.no_grad():
         x = torch.from_numpy(img)
         keep_axials = torch.tensor(keep_axials)[None]
@@ -762,15 +761,27 @@ def _get_prediction(img, models, keep_axials, device, is_logarithm,
     return prediction
 
 
-def _get_seg_prediction(img, models, keep_axials, device, patch_size=None,
-                        crop_box=None, is_logging=True, batch_size=1,
+def _get_seg_prediction(img,
+                        models,
+                        keep_axials,
+                        device,
+                        patch_size=None,
+                        is_logging=True,
+                        batch_size=1,
                         memmap_dir=None):
     """
     input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
     """
     prediction = _get_prediction(
-        img, models, keep_axials, device, True, patch_size, crop_box,
-        is_logging, batch_size, memmap_dir
+        img,
+        models,
+        keep_axials,
+        device,
+        True,
+        patch_size=patch_size,
+        is_logging=is_logging,
+        batch_size=batch_size,
+        memmap_dir=memmap_dir,
     )
     if img.ndim == 3:
         for z in range(prediction.shape[1]):
@@ -968,6 +979,16 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
     resize_factor = [1, ] * n_dims
     if tiff_input is not None:
         img_input = skimage.io.imread(tiff_input).astype('float32')
+        if input_size is not None and img_input.shape[-n_dims:] != input_size:
+            original_size = img_input.shape
+            resize_factor = [input_size[d] / original_size[d] for d in
+                             range(n_dims)]
+        if crop_box is not None:
+            slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
+                    slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
+            if img_input.ndim == 3:  # Z
+                slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
+            img_input = img_input[slices]
         if use_median:
             global_median = np.median(img_input)
             for z in range(img_input.shape[0]):
@@ -975,27 +996,33 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                 if 0 < slice_median:
                     img_input[z] -= slice_median - global_median
         img_input = normalize_zero_one(img_input)
-        if input_size is not None and img_input.shape[-n_dims:] != input_size:
-            original_size = img_input.shape
+        if any(factor != 1 for factor in resize_factor):
+            target_size = [int(dim * factor) for dim, factor in zip(img_input.shape, resize_factor)]
             img_input = F.interpolate(torch.from_numpy(img_input)[None, None],
-                                      size=input_size,
+                                      size=target_size,
                                       mode=('trilinear' if is_3d else
                                             'bilinear'),
                                       align_corners=True,
                                       )[0, 0].numpy()
-            resize_factor = [input_size[d] / original_size[d] for d in
-                             range(n_dims)]
     elif zpath_input is not None:
         za_input = zarr.open(zpath_input, mode='r')
-        img_input = get_input_at(za_input,
-                                 timepoint,
-                                 memmap_dir=memmap_dir,
-                                 use_median=use_median,
-                                 img_size=input_size)
         if input_size is not None and za_input.shape[-n_dims:] != input_size:
             original_size = za_input.shape[-n_dims:]
             resize_factor = [input_size[d] / original_size[d] for d in
                              range(n_dims)]
+        if crop_box is not None:
+            target_size = [
+                int(crop_box[-n_dims + d] * resize_factor[d]) for d in range(n_dims)
+            ]
+        else:
+            target_size = input_size
+        img_input = get_input_at(za_input,
+                                 timepoint,
+                                 memmap_dir=memmap_dir,
+                                 use_median=use_median,
+                                 img_size=target_size,
+                                 crop_box=crop_box,
+                                 )
     else:
         raise RuntimeError('No image is specified.')
     if any(factor != 1 for factor in resize_factor):
@@ -1024,7 +1051,6 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                                     keep_axials,
                                     device,
                                     patch_size[-2:],
-                                    crop_box,
                                     batch_size=batch_size,
                                     memmap_dir=memmap_dir)
                 for z in range(img_input.shape[0])
@@ -1035,7 +1061,6 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
                                              keep_axials,
                                              device,
                                              patch_size,
-                                             crop_box,
                                              batch_size=batch_size,
                                              memmap_dir=memmap_dir)
 
@@ -1097,16 +1122,28 @@ def detect_spots(device, model_path, keep_axials=(True,) * 4, is_pad=False,
     return spots
 
 
-def _get_flow_prediction(img, models, keep_axials, device, patch_size=None,
-                         crop_box=None, is_logging=True, batch_size=1,
+def _get_flow_prediction(img,
+                         models,
+                         keep_axials,
+                         device,
+                         patch_size=None,
+                         is_logging=True,
+                         batch_size=1,
                          memmap_dir=None):
     """
     input: 4D (N, C, H, W) or 5D (N, C, D, H, W) tensor
     """
     # save and use as float16 to save the storage
     return _get_prediction(
-        img, models, keep_axials, device, False, patch_size, crop_box,
-        is_logging, batch_size, memmap_dir
+        img,
+        models,
+        keep_axials,
+        device,
+        False,
+        patch_size=patch_size,
+        is_logging=is_logging,
+        batch_size=batch_size,
+        memmap_dir=memmap_dir,
     ).astype('float16')
 
 

@@ -75,13 +75,31 @@ def _load_image(img, use_median=False, img_size=None):
     return img
 
 
-def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
-                        img_size=None):
+def _get_memmap_or_load(za,
+                        timepoint,
+                        memmap_dir=None,
+                        use_median=False,
+                        img_size=None,
+                        crop_box=None):
+    if crop_box is not None:
+        sliced_shape = crop_box[4:]
+        slices = (slice(crop_box[1], crop_box[1] + crop_box[4]),  # Y
+                slice(crop_box[2], crop_box[2] + crop_box[5]))  # X
+        if len(za.shape) == 4:  # Z
+            sliced_shape = crop_box[3:]
+            slices = (slice(crop_box[0], crop_box[0] + crop_box[3]),) + slices
+    else:
+        slices = (slice(None), slice(None))
+        if len(za.shape) == 4:
+            slices = (slice(None),) + slices
+        sliced_shape = za.shape[1:]
     if memmap_dir:
         key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
         fpath_org = Path(memmap_dir) / f'{key}.dat'
         if img_size is not None:
             key += '-' + '-'.join(map(str, img_size))
+        if crop_box is not None:
+            key += '-crop' + '-'.join(map(str, crop_box))
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
@@ -92,15 +110,15 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
                     fpath_org,
                     dtype='float32',
                     mode='w+',
-                    shape=za.shape[1:]
+                    shape=sliced_shape,
                 )
-                img_org[:] = za[timepoint].astype('float32')
+                img_org[:] = za[(timepoint,) + slices].astype('float32')
             else:
                 img_org = np.memmap(
                     fpath_org,
                     dtype='float32',
                     mode='c',
-                    shape=za.shape[1:]
+                    shape=sliced_shape,
                 )
             if not fpath.exists():
                 logger().info(f'creating {fpath}')
@@ -122,18 +140,23 @@ def _get_memmap_or_load(za, timepoint, memmap_dir=None, use_median=False,
                 dtype='float32',
                 mode='c',
                 shape=za.shape[1:] if img_size is None else img_size
-            )
+            )[slices]
     else:
         img = _load_image(
-            za[timepoint].astype('float32'),
+            za[(timepoint,) + slices].astype('float32'),
             use_median=use_median,
             img_size=img_size,
         )
     return img
 
 
-def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
-                 use_median=False, img_size=None):
+def get_input_at(za_input,
+                 timepoint,
+                 cache_dict=None,
+                 memmap_dir=None,
+                 use_median=False,
+                 img_size=None,
+                 crop_box=None):
     if cache_dict:
         key = f'{za_input.store.path}-t{timepoint}-{use_median}'
         if img_size is not None:
@@ -142,16 +165,24 @@ def get_input_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
         if cache is None:
             cache = cache_dict.get(
                 key,
-                _get_memmap_or_load(za_input, timepoint, memmap_dir,
-                                    use_median, img_size)
+                _get_memmap_or_load(za_input,
+                                    timepoint,
+                                    memmap_dir,
+                                    use_median,
+                                    img_size,
+                                    crop_box=crop_box)
             )
         return cache
-    return _get_memmap_or_load(za_input, timepoint, memmap_dir, use_median,
-                               img_size)
+    return _get_memmap_or_load(za_input,
+                               timepoint,
+                               memmap_dir,
+                               use_median,
+                               img_size,
+                               crop_box=crop_box)
 
 
 def get_inputs_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
-                  img_size=None):
+                  img_size=None, crop_box=None):
     if cache_dict:
         key = f'{za_input.store.path}-t{timepoint}-t{timepoint+1}'
         if img_size is not None:
@@ -164,7 +195,8 @@ def get_inputs_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
                                        i,
                                        cache_dict,
                                        memmap_dir,
-                                       img_size=img_size)
+                                       img_size=img_size,
+                                       crop_box=crop_box)
                           for i in (timepoint, timepoint+1)])
             )
         return cache
@@ -172,7 +204,8 @@ def get_inputs_at(za_input, timepoint, cache_dict=None, memmap_dir=None,
                                   i,
                                   cache_dict,
                                   memmap_dir,
-                                  img_size=img_size)
+                                  img_size=img_size,
+                                  crop_box=crop_box)
                      for i in (timepoint, timepoint+1)])
 
 

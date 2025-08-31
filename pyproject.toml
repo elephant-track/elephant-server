@@ -1,0 +1,9 @@
+[tool.uv.workspace]
+members = ["apps/elephant_server", "libs/elephant_core"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+

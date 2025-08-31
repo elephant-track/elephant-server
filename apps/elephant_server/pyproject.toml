@@ -1,0 +1,38 @@
+[project]
+name = "elephant-server"
+dynamic = ["version"]
+description = "Flask application for Elephant."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "celery~=5.4.0",
+    "Flask~=3.0.3",
+    "flask-restx~=1.3.0",
+    "flask-redis~=0.4.0",
+    "elephant-core",
+]
+
+[project.scripts]
+elephant-server = "elephant_server.main:main"
+
+[build-system]
+requires = ["hatchling>=1.25", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/elephant_server/_version.py"
+
+[tool.hatch.version.raw-options]
+search_parent_directories = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/elephant_server"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/README.md", "/src/elephant_server"]
+
+[tool.uv.sources]
+elephant-core = { workspace = true }

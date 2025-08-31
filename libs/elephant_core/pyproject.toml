@@ -1,0 +1,41 @@
+[project]
+name = "elephant-core"
+dynamic = ["version"]
+description = "Core logic for Elephant"
+readme = "README.md"
+authors = [
+    { name = "Ko Sugawara", email = "ko.sugawara@riken.jp" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "zarr~=2.18.2",
+    "filelock~=3.13.1",
+    "nvsmi~=0.4.2",
+    "psutil~=5.9.0",
+    "scikit-image~=0.24.0",
+    "pika~=1.3.2",
+    "redis~=5.0.8",
+    "h5py~=3.11.0",
+    "tqdm~=4.66.4",
+    "tensorflow~=2.17.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/elephant_core/_version.py"
+
+[tool.hatch.version.raw-options]
+search_parent_directories = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/elephant_core"]
+include = ["src/elephant_core/py.typed"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/README.md", "/src/elephant_core"]

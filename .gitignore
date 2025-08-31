@@ -65,3 +65,7 @@ target/
 
 # IDEA
 .idea/
+
+# uv
+/libs/elephant_core/src/elephant_core/_version.py
+/apps/elephant_server/src/elephant_server/_version.py

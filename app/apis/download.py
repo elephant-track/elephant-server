@@ -46,13 +46,13 @@ from elephant.redis_util import TrainState
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.util import get_device
 
-api = Namespace('download', description='Download APIs')
+api = Namespace("download", description="Download APIs")
 
 
 class FileRemover(object):
-    '''
+    """
     https: // stackoverflow.com/a/32132035
-    '''
+    """
 
     def __init__(self):
         self.weak_references = dict()  # weak_ref -> filepath to remove
@@ -63,41 +63,41 @@ class FileRemover(object):
 
     def _do_cleanup(self, wr):
         filepath = self.weak_references[wr]
-        print('Deleting %s' % filepath)
+        logger().info("Deleting %s" % filepath)
         os.remove(filepath)
 
 
 file_remover = FileRemover()
 
 
-@api.route('/ctc')
+@api.route("/ctc")
 class CTC(Resource):
     @api.doc()
     def post(self):
-        '''
+        """
         Download outputs in CTC format.
 
-        '''
-        if request.headers['Content-Type'] != 'application/json':
-            msg = 'Content-Type should be application/json'
+        """
+        if request.headers["Content-Type"] != "application/json":
+            msg = "Content-Type should be application/json"
             return make_response(jsonify(error=msg), 400)
         state = get_state()
-        while (state == TrainState.WAIT.value):
-            logger().info(f'waiting @{request.path}')
+        while state == TrainState.WAIT.value:
+            logger().info(f"waiting @{request.path}")
             time.sleep(1)
             state = get_state()
-            if (state == TrainState.IDLE.value):
-                return make_response('', 204)
+            if state == TrainState.IDLE.value:
+                return make_response("", 204)
         try:
             req_json = request.get_json()
-            req_json['device'] = get_device()
+            req_json["device"] = get_device()
             config = ExportConfig(req_json)
-            za_input = zarr.open(config.zpath_input, mode='r')
+            za_input = zarr.open(config.zpath_input, mode="r")
             config.shape = za_input.shape[1:]
             logger().info(config)
             spots_dict = collections.defaultdict(list)
-            for spot in req_json.get('spots'):
-                spots_dict[spot['t']].append(spot)
+            for spot in req_json.get("spots"):
+                spots_dict[spot["t"]].append(spot)
             spots_dict = collections.OrderedDict(sorted(spots_dict.items()))
 
             redis_client.set(REDIS_KEY_STATE, TrainState.WAIT.value)
@@ -106,47 +106,44 @@ class CTC(Resource):
                 resp = send_file(result)
                 # file_remover.cleanup_once_done(resp, result)
             elif not result:
-                resp = make_response('', 204)
+                resp = make_response("", 204)
             else:
-                resp = make_response('', 200)
+                resp = make_response("", 200)
         except RuntimeError as e:
-            logger().exception('Failed in export_ctc_labels')
-            return make_response(jsonify(error=f'Runtime Error: {e}'), 500)
+            logger().exception("Failed in export_ctc_labels")
+            return make_response(jsonify(error=f"Runtime Error: {e}"), 500)
         except Exception as e:
-            logger().exception('Failed in export_ctc_labels')
-            return make_response(jsonify(error=f'Exception: {e}'), 500)
+            logger().exception("Failed in export_ctc_labels")
+            return make_response(jsonify(error=f"Exception: {e}"), 500)
         finally:
             if get_state() != TrainState.IDLE.value:
                 redis_client.set(REDIS_KEY_STATE, state)
         return resp
 
 
-@ api.route('/model')
+@api.route("/model")
 class Model(Resource):
-    @ api.doc()
+    @api.doc()
     def post(self):
-        '''
+        """
         Download a model paramter file.
 
-        '''
-        if request.headers['Content-Type'] != 'application/json':
-            msg = 'Content-Type should be application/json'
+        """
+        if request.headers["Content-Type"] != "application/json":
+            msg = "Content-Type should be application/json"
             logger().error(msg)
             return make_response(jsonify(error=msg), 400)
         req_json = request.get_json()
         config = BaseConfig(req_json)
         logger().info(config)
         if not Path(config.model_path).exists():
-            logger().info(
-                f'model file {config.model_path} not found @{request.path}')
+            logger().info(f"model file {config.model_path} not found @{request.path}")
             return make_response(
-                jsonify(message=f'model file {config.model_path} not found'),
-                204
+                jsonify(message=f"model file {config.model_path} not found"), 204
             )
         try:
             resp = send_file(config.model_path)
         except Exception as e:
-            logger().exception(
-                'Failed to prepare a model parameter file for download')
-            return make_response(jsonify(error=f'Exception: {e}'), 500)
+            logger().exception("Failed to prepare a model parameter file for download")
+            return make_response(jsonify(error=f"Exception: {e}"), 500)
         return resp

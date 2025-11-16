@@ -23,26 +23,21 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ==============================================================================
 """Flask endpoints."""
-import os
-
 from celery import Celery
 from flask import Flask
 from flask import request
-from flask_redis import FlaskRedis
 
 from apis import init_api
 from elephant.logging import logger
-from elephant.redis_util import TrainState
 from elephant.redis_util import REDIS_HOST
-from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import REDIS_PORT
 
 
 def make_celery(app):
     celery = Celery(
         app.import_name,
-        backend=app.config['result_backend'],
-        broker=app.config['broker_url']
+        backend=app.config["result_backend"],
+        broker=app.config["broker_url"],
     )
     celery.conf.update(app.config)
 
@@ -57,8 +52,8 @@ def make_celery(app):
 
 app = Flask(__name__)
 app.config.update(
-    broker_url=f'redis://{REDIS_HOST}:{REDIS_PORT}',
-    result_backend=f'redis://{REDIS_HOST}:{REDIS_PORT}',
+    broker_url=f"redis://{REDIS_HOST}:{REDIS_PORT}",
+    result_backend=f"redis://{REDIS_HOST}:{REDIS_PORT}",
     worker_redirect_stdouts=False,
     worker_prefetch_multiplier=1,
 )
@@ -69,18 +64,16 @@ celery = make_celery(app)
 init_api(app)
 
 
-@ app.before_request
+@app.before_request
 def log_before_request():
-    if request.endpoint not in (None, 'gpus'):
-        logger().info(f'START {request.method} {request.path}')
+    if request.endpoint not in (None, "gpus"):
+        logger().info(f"START {request.method} {request.path}")
 
 
-@ app.after_request
+@app.after_request
 def log_after_request(response):
-    if request.endpoint not in (None, 'gpus'):
-        logger().info(
-            f'DONE {request.method} {request.path} => [{response.status}]'
-        )
+    if request.endpoint not in (None, "gpus"):
+        logger().info(f"DONE {request.method} {request.path} => [{response.status}]")
     return response
 
 

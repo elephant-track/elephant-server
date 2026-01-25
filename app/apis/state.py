@@ -103,7 +103,7 @@ class GPUs(Resource):
 
                     gpus.append(
                         {
-                            "id": i,
+                            "id": str(i),
                             "name": name,
                             "mem_total": mem.total // MiB,  # MiB
                             "mem_used": mem.used // MiB,  # MiB

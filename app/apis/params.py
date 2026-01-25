@@ -33,44 +33,48 @@ from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_LR
 from elephant.redis_util import REDIS_KEY_NCROPS
 
-api = Namespace('params', description='Get state or change params')
+api = Namespace("params", description="Get state or change params")
 
 
-@api.route('/')
+@api.route("/")
 class Root(Resource):
     @api.doc()
     def get(self):
-        '''
+        """
         Get current parameters.
 
-        '''
+        """
         return make_response(
-            jsonify(success=True,
-                    lr=float(redis_client.get(REDIS_KEY_LR, 0)),
-                    n_crops=int(redis_client.get(REDIS_KEY_NCROPS, 0)))
+            jsonify(
+                success=True,
+                lr=float(redis_client.get(REDIS_KEY_LR, 0)),
+                n_crops=int(redis_client.get(REDIS_KEY_NCROPS, 0)),
+            )
         )
 
     def post(self):
-        if request.headers['Content-Type'] != 'application/json':
-            msg = 'Content-Type should be application/json'
+        if request.headers["Content-Type"] != "application/json":
+            msg = "Content-Type should be application/json"
             logger().error(msg)
             return make_response(jsonify(error=msg), 400)
         req_json = request.get_json()
-        lr = req_json.get('lr')
+        lr = req_json.get("lr")
         if not isinstance(lr, float) or lr < 0:
-            msg = f'Invalid learning rate: {lr}'
+            msg = f"Invalid learning rate: {lr}"
             logger().error(msg)
             return make_response(jsonify(error=msg), 400)
-        n_crops = req_json.get('n_crops')
+        n_crops = req_json.get("n_crops")
         if not isinstance(n_crops, int) or n_crops < 0:
-            msg = f'Invalid number of crops: {n_crops}'
+            msg = f"Invalid number of crops: {n_crops}"
             logger().error(msg)
             return make_response(jsonify(error=msg), 400)
         redis_client.set(REDIS_KEY_LR, str(lr))
         redis_client.set(REDIS_KEY_NCROPS, str(n_crops))
-        logger().info(f'[params updated] lr: {lr}, n_crops: {n_crops}')
+        logger().info(f"[params updated] lr: {lr}, n_crops: {n_crops}")
         return make_response(
-            jsonify(success=True,
-                    lr=float(redis_client.get(REDIS_KEY_LR)),
-                    n_crops=int(redis_client.get(REDIS_KEY_NCROPS)))
+            jsonify(
+                success=True,
+                lr=float(redis_client.get(REDIS_KEY_LR)),
+                n_crops=int(redis_client.get(REDIS_KEY_NCROPS)),
+            )
         )

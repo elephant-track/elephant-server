@@ -27,8 +27,15 @@ from flask import make_response
 from flask import request
 from flask_restx import Namespace
 from flask_restx import Resource
-import nvsmi
 import psutil
+from pynvml import (
+    nvmlInit,
+    nvmlShutdown,
+    nvmlDeviceGetCount,
+    nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetName,
+    nvmlDeviceGetMemoryInfo,
+)
 
 
 from elephant.logging import logger
@@ -37,68 +44,85 @@ from elephant.redis_util import redis_client
 from elephant.redis_util import REDIS_KEY_STATE
 from elephant.redis_util import TrainState
 
-api = Namespace('state', description='Get or update state')
+MiB = 1024 * 1024
+
+api = Namespace("state", description="Get or update state")
 
 
-@api.route('/process')
+@api.route("/process")
 class Process(Resource):
     @api.doc()
     def get(self):
-        '''
+        """
         Check Process state.
 
-        '''
-        return make_response(
-            jsonify(success=True, state=get_state())
-        )
+        """
+        return make_response(jsonify(success=True, state=get_state()))
 
     def post(self):
-        '''
+        """
         Update process state.
 
-        '''
-        if request.headers['Content-Type'] != 'application/json':
-            msg = 'Content-Type should be application/json'
+        """
+        if request.headers["Content-Type"] != "application/json":
+            msg = "Content-Type should be application/json"
             logger().error(msg)
             return make_response(jsonify(error=msg), 400)
         req_json = request.get_json()
         state = req_json.get(REDIS_KEY_STATE)
-        if (not isinstance(state, int) or
-                state not in TrainState._value2member_map_):
-            msg = f'Invalid state: {state}'
+        if not isinstance(state, int) or state not in TrainState._value2member_map_:
+            msg = f"Invalid state: {state}"
             logger().error(msg)
             return make_response(jsonify(res=msg), 400)
         redis_client.set(REDIS_KEY_STATE, state)
-        return make_response(
-            jsonify(success=True, state=get_state())
-        )
+        return make_response(jsonify(success=True, state=get_state()))
 
 
-@ api.route('/gpus', endpoint='gpus')
+@api.route("/gpus", endpoint="gpus")
 class GPUs(Resource):
-    @ api.doc()
+
+    @api.doc()
     def get(self):
-        '''
+        """
         Get GPU status.
 
-        '''
+        """
         gpus = []
         try:
-            for gpu in nvsmi.get_gpus():
-                gpus.append({
-                    'id': gpu.id,
-                    'name': gpu.name,
-                    'mem_total': gpu.mem_total,
-                    'mem_used': gpu.mem_used
-                })
+            nvmlInit()
+            try:
+                count = nvmlDeviceGetCount()
+                for i in range(count):
+                    h = nvmlDeviceGetHandleByIndex(i)
+
+                    name = nvmlDeviceGetName(h)
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
+
+                    mem = nvmlDeviceGetMemoryInfo(h)  # bytes単位
+
+                    gpus.append(
+                        {
+                            "id": str(i),
+                            "name": name,
+                            "mem_total": mem.total // MiB,  # MiB
+                            "mem_used": mem.used // MiB,  # MiB
+                        }
+                    )
+            finally:
+                nvmlShutdown()
             resp = jsonify(gpus)
         except Exception:
             pass
         if len(gpus) == 0:
-            resp = jsonify([{
-                'id': 'GPU is not available',
-                'name': 'CPU is used',
-                'mem_total': psutil.virtual_memory().total / 1024 / 1024,
-                'mem_used': psutil.virtual_memory().used / 1024 / 1024
-            }])
+            resp = jsonify(
+                [
+                    {
+                        "id": "GPU is not available",
+                        "name": "CPU is used",
+                        "mem_total": psutil.virtual_memory().total / 1024 / 1024,
+                        "mem_used": psutil.virtual_memory().used / 1024 / 1024,
+                    }
+                ]
+            )
         return resp

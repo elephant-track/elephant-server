@@ -228,7 +228,7 @@ def _update_flow_labels(
                 rotation=rotation,
                 scales=scales,
                 shape=label.shape[-n_dims:],
-                min_area=MIN_AREA_ELLIPSOID,
+                minarea=MIN_AREA_ELLIPSOID,
             )
             weight = 1  # if spot['tag'] in ['tp'] else false_weight
             displacement = spot["displacement"]  # X, Y, Z

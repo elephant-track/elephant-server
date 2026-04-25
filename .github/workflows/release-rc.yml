@@ -1,0 +1,33 @@
+name: Release RC to TestPyPI
+on:
+  push:
+    tags: ["v*rc*"]
+
+concurrency: publish-${{ github.ref }}
+jobs:
+  publish-testpypi:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv (and cache)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Build core
+        run: uv build libs/elephant_core --no-sources
+
+      - name: Publish core to TestPyPI
+        run: uv publish libs/elephant_core --index testpypi --token "${{ secrets.TESTPYPI_TOKEN }}" --no-sources
+
+      - name: Build app
+        run: uv build apps/elephant_server --no-sources
+
+      - name: Publish app to TestPyPI
+        run: uv publish apps/elephant_server --index testpypi --token "${{ secrets.TESTPYPI_TOKEN }}" --no-sources

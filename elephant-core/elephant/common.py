@@ -941,7 +941,7 @@ def _region_to_spot(
     i_frame,
     props,
 ):
-    area, centroid, bbox, image = props
+    area, centroid, bbox, image, quality = props
     if area < min_area:
         # print('skip a spot with volume {} below threshold {}'
         #       .format(area, min_area))
@@ -990,7 +990,12 @@ def _region_to_spot(
     def flatten(o):
         return [item for sublist in o for item in sublist]
 
-    spot = {"t": i_frame, "pos": centroid[::-1], "covariance": flatten(cov)[::-1]}
+    spot = {
+        "t": i_frame,
+        "pos": centroid[::-1],
+        "covariance": flatten(cov)[::-1],
+        "quality": float(quality)
+    }
     return spot
 
 
@@ -1068,7 +1073,7 @@ def _find_and_push_spots(
         labels, max_label = _label_bool_inplace(c_bin, return_num=True, output=labels)
     else:
         labels, max_label = skimage.measure.label(p_thresh < c_probs, return_num=True)
-    regions = skimage.measure.regionprops(labels)
+    regions = skimage.measure.regionprops(labels, intensity_image=c_probs)
     logger().info(f"{max_label} detections found")
 
     if scales is None:
@@ -1087,7 +1092,7 @@ def _find_and_push_spots(
         min_area = 4 / 3 * math.pi * (r_min * c_ratio) ** 3 / reduce(mul, scales)
 
     props_list = [
-        [region.area, region.centroid, region.bbox, region.image] for region in regions
+        [region.area, region.centroid, region.bbox, region.image, region.intensity_mean] for region in regions
     ]
 
     logger().info(

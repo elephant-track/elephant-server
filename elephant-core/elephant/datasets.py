@@ -93,13 +93,37 @@ def _get_memmap_or_load(za,
         if len(za.shape) == 4:
             slices = (slice(None),) + slices
         sliced_shape = za.shape[1:]
+    if crop_box is not None:
+        # The memmap cache is keyed and shaped for whole timepoints and cannot
+        # represent a crop, in three independent ways:
+        #
+        # 1. fpath_org's key is '{dataset}-t{timepoint}-{use_median}', with
+        #    no crop in it, but it is created with shape=sliced_shape and
+        #    filled from za[(timepoint,) + slices] -- i.e. a file named "the
+        #    whole frame at t" holding only this crop. Every later read of
+        #    that timepoint, cropped differently or not cropped at all, opens
+        #    it with its own sliced_shape and either raises "mmap length is
+        #    greater than file size" or silently reads the wrong pixels. It
+        #    persists on disk, so one cropped predict poisons that timepoint
+        #    until the .dat files are removed.
+        #
+        # 2. The return slices the cached array by `slices` a second time.
+        #    Those are absolute offsets into the full frame, but fpath already
+        #    holds only the crop, so a crop at y=900 of a 1000-row frame
+        #    indexes rows 900.. of an array with crop_box[4] rows -- empty.
+        #
+        # 3. fpath is created with shape=img_size, which the caller leaves at
+        #    None whenever the crop needs no rescaling, and np.memmap raises
+        #    "shape must be given if mode == 'w+'".
+        #
+        # Reading the crop straight from the zarr is correct, and a crop is
+        # small enough that the cache was never buying anything here.
+        memmap_dir = None
     if memmap_dir:
         key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
         fpath_org = Path(memmap_dir) / f'{key}.dat'
         if img_size is not None:
             key += '-' + '-'.join(map(str, img_size))
-        if crop_box is not None:
-            key += '-crop' + '-'.join(map(str, crop_box))
         fpath = Path(memmap_dir) / f'{key}.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:

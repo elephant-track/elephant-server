@@ -342,7 +342,7 @@ class SegmentationDatasetBase(du.Dataset):
                         za_label_a.attrs[
                             f'label.indices.{self.i_frame}'
                         ] = tuple(map(tuple, index_pool.tolist()))
-            else:
+            elif not self.is_ae:
                 index_pool = np.argwhere(0 < img_label)
             if self.is_ae:
                 origins = [
@@ -642,7 +642,9 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
                 get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
         if self.is_ae:
+            # prior training: the input is its own target, there is no label
             i_frame = randrange(self.za_input.shape[0])
+            img_label = None
         else:
             if self.is_livemode:
                 while True:

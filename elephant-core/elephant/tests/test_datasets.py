@@ -25,6 +25,7 @@
 """Test datasets."""
 
 import numpy as np
+import torch
 import pytest
 import zarr
 
@@ -100,3 +101,28 @@ def test_whole_frame_reads_are_still_cached(za, tmp_path):
     second = _get_memmap_or_load(za, 1, memmap_dir=str(memmap_dir),
                                  img_size=None, crop_box=None)
     assert np.array_equal(first, second)
+
+
+@pytest.mark.parametrize('run_on_flask', [False, True])
+def test_prior_training_items_need_no_label(tmp_path, monkeypatch,
+                                            run_on_flask):
+    """Prior training (a model reset without pretrained weights) has no label.
+
+    AutoencoderDatasetZarr.__getitem__ left img_label unassigned in its is_ae
+    branch, so every item raised "local variable 'img_label' referenced before
+    assignment" and POST /seg/reset with url=None failed with HTTP 500. Outside
+    Flask, _generate_item also built its crop index pool from the label.
+    """
+    import elephant.datasets as ds
+
+    monkeypatch.setattr(ds, 'RUN_ON_FLASK', run_on_flask)
+    rng = np.random.default_rng(0)
+    zpath = tmp_path / 'ds' / 'imgs.zarr'
+    arr = zarr.open(str(zpath), mode='w', shape=(3, 64, 64),
+                    dtype='float32', chunks=(1, 64, 64))
+    arr[:] = rng.random((3, 64, 64), dtype='float32')
+    dataset = ds.AutoencoderDatasetZarr(str(zpath), (64, 64), (32, 32), 2,
+                                        memmap_dir=str(tmp_path / 'memmap'))
+    (x, _), y = dataset[0]
+    assert tuple(x.shape) == (1, 32, 32)
+    assert torch.equal(x, y)  # the target of the prior is the input itself

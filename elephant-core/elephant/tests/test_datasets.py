@@ -126,3 +126,79 @@ def test_prior_training_items_need_no_label(tmp_path, monkeypatch,
     (x, _), y = dataset[0]
     assert tuple(x.shape) == (1, 32, 32)
     assert torch.equal(x, y)  # the target of the prior is the input itself
+
+
+def _labelled_dataset(tmp_path, ds):
+    """A 3-frame movie whose frames carry a label and an index pool."""
+    rng = np.random.default_rng(0)
+    zi = tmp_path / 'ds' / 'imgs.zarr'
+    zl = tmp_path / 'ds' / 'seg_labels.zarr'
+    imgs = zarr.open(str(zi), mode='w', shape=(3, 64, 64),
+                     dtype='float32', chunks=(1, 64, 64))
+    imgs[:] = rng.random((3, 64, 64), dtype='float32')
+    labels = zarr.open(str(zl), mode='w', shape=(3, 64, 64),
+                       dtype='uint8', chunks=(1, 64, 64))
+    for t in range(3):
+        label = np.zeros((64, 64), dtype='uint8')
+        centres = rng.integers(8, 56, size=(4, 2))
+        for y, x in centres:
+            label[y - 3:y + 4, x - 3:x + 4] = 2
+            label[y - 1:y + 2, x - 1:x + 2] = 3
+        labels[t] = label
+        labels.attrs[f'label.indices.{t}'] = centres.tolist()
+    labels.attrs['updated'] = True
+    return ds.SegmentationDatasetZarr(
+        str(zi), str(zl), [0, 1, 2], (64, 64), (32, 32), 4,
+        (False,) * 4, cache_maxbytes=1 << 20,
+        memmap_dir=str(tmp_path / 'memmap'))
+
+
+def test_label_attributes_are_read_once_per_frame(tmp_path, monkeypatch):
+    """The label attributes are one JSON file holding every frame's index
+    pool. Every item opened and parsed it twice; on a 300-frame movie
+    (2.5 MB) that was 4/5 of a training step. Outside live mode they cannot
+    change during a run, so a dataset reads each frame's pool once and checks
+    the 'updated' flag once."""
+    import elephant.datasets as ds
+
+    monkeypatch.setattr(ds, 'RUN_ON_FLASK', True)
+    dataset = _labelled_dataset(tmp_path, ds)
+    opens = []
+    real_open = zarr.open
+
+    def counting_open(path, *args, **kwargs):
+        if str(path).endswith('seg_labels.zarr'):
+            opens.append(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(ds.zarr, 'open', counting_open)
+    for _ in range(4):
+        for i in range(len(dataset)):
+            dataset[i]
+    assert len(opens) == 3 + 1  # one pool per frame, one flag check
+    assert not real_open(dataset.zpath_seg_label, mode='r').attrs['updated']
+
+
+def test_reading_once_does_not_change_the_items(tmp_path, monkeypatch):
+    """The same seeds give the same crops as reading the attributes for
+    every item, as the server did before."""
+    import random
+    import elephant.datasets as ds
+
+    monkeypatch.setattr(ds, 'RUN_ON_FLASK', True)
+    dataset = _labelled_dataset(tmp_path, ds)
+
+    def items(read_every_time):
+        random.seed(1)
+        torch.manual_seed(1)
+        out = []
+        for i in range(len(dataset)):
+            if read_every_time:
+                dataset.index_pools.clear()
+                dataset.label_update_checked = False
+            (x, _), y = dataset[i]
+            out.append((x, y))
+        return out
+
+    for (x0, y0), (x1, y1) in zip(items(True), items(False)):
+        assert torch.equal(x0, x1) and torch.equal(y0, y1)

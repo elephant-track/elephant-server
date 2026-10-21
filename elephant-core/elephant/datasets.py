@@ -334,14 +334,7 @@ class SegmentationDatasetBase(du.Dataset):
 
             if RUN_ON_FLASK and isinstance(self, SegmentationDatasetZarr):
                 if not self.is_ae:
-                    za_label_a = zarr.open(self.zpath_seg_label, mode='a')
-                    index_pool = za_label_a.attrs.get(
-                        f'label.indices.{self.i_frame}')
-                    if index_pool is None:
-                        index_pool = np.argwhere(0 < img_label)
-                        za_label_a.attrs[
-                            f'label.indices.{self.i_frame}'
-                        ] = tuple(map(tuple, index_pool.tolist()))
+                    index_pool = self._index_pool(img_label)
             elif not self.is_ae:
                 index_pool = np.argwhere(0 < img_label)
             if self.is_ae:
@@ -553,6 +546,28 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
             self.cache_dict_input = None
             self.cache_dict_label = None
         self.memmap_dir = memmap_dir
+        # The label attributes are one JSON file holding every labelled
+        # frame's index pool (2.5 MB for a 300-frame movie). Parsing it for
+        # every item took 4/5 of a training step. Outside live mode, labels
+        # are updated before a training run starts, not during it, so each
+        # dataset reads them once.
+        self.index_pools = {}
+        self.label_update_checked = False
+
+    def _index_pool(self, img_label):
+        """Positions to centre a crop on, for the current frame."""
+        if not self.is_livemode and self.i_frame in self.index_pools:
+            return self.index_pools[self.i_frame]
+        za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+        index_pool = za_label_a.attrs.get(f'label.indices.{self.i_frame}')
+        if index_pool is None:
+            index_pool = np.argwhere(0 < img_label)
+            za_label_a.attrs[
+                f'label.indices.{self.i_frame}'
+            ] = tuple(map(tuple, index_pool.tolist()))
+        if not self.is_livemode:
+            self.index_pools[self.i_frame] = index_pool
+        return index_pool
 
     def __len__(self):
         if self.length is not None:
@@ -608,11 +623,13 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            if RUN_ON_FLASK:
+            if RUN_ON_FLASK and (self.is_livemode or
+                                 not self.label_update_checked):
                 za_label_a = zarr.open(self.zpath_seg_label, mode='a')
                 if za_label_a.attrs.get('updated', False):
                     self.cache_dict_label.clear()
                     za_label_a.attrs['updated'] = False
+                self.label_update_checked = True
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -854,6 +871,9 @@ class FlowDatasetZarr(du.Dataset):
         else:
             self.use_cache = False
         self.memmap_dir = memmap_dir
+        # Read once per dataset; see SegmentationDatasetZarr.index_pools.
+        self.index_pools = {}
+        self.label_update_checked = False
 
     def __len__(self):
         if self.length is not None:
@@ -908,10 +928,12 @@ class FlowDatasetZarr(du.Dataset):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
-            if za_label_a.attrs.get('updated', False):
-                self.cache_dict_label.clear()
-                za_label_a.attrs['updated'] = False
+            if not self.label_update_checked:
+                za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+                if za_label_a.attrs.get('updated', False):
+                    self.cache_dict_label.clear()
+                    za_label_a.attrs['updated'] = False
+                self.label_update_checked = True
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -988,13 +1010,16 @@ class FlowDatasetZarr(du.Dataset):
                     item_crop_size[i] = math.ceil(item_crop_size[i])
                 item_crop_size = [min(img_input.shape[i], item_crop_size[i])
                                   for i in range(self.n_dims)]
-            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
-            index_pool = za_label_a.attrs.get(f'label.indices.{i_frame}')
+            index_pool = self.index_pools.get(i_frame)
             if index_pool is None:
-                index_pool = np.argwhere(0 < img_label[-1])
-                za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
-                    map(tuple, index_pool.tolist())
-                )
+                za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+                index_pool = za_label_a.attrs.get(f'label.indices.{i_frame}')
+                if index_pool is None:
+                    index_pool = np.argwhere(0 < img_label[-1])
+                    za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
+                        map(tuple, index_pool.tolist())
+                    )
+                self.index_pools[i_frame] = index_pool
             base_index = index_pool[randrange(len(index_pool))]
             origins = [
                 randint(

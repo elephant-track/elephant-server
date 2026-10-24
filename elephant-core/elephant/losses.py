@@ -113,7 +113,11 @@ class SegmentationLoss(nn.Module):
                         prediction[i:i + 1, :, heavy_weight_mask],
                         torch.fmod(target[i:i + 1, heavy_weight_mask], 3)
                     ) * self.false_weight * heavy_weight_voxels
-                    weight_sum += heavy_weight_voxels * self.false_weight
+                    # Not in place: after the light-weight voxels weight_sum is a
+                    # Long tensor, and PyTorch refuses to add a Float into it in
+                    # place, so every crop holding a correction (fp/fn) next to an
+                    # ordinary label raised and the training task died.
+                    weight_sum = weight_sum + heavy_weight_voxels * self.false_weight
                 if not self.is_oldloss and 0 < weight_sum:
                     self.nll_loss += nll_sum / weight_sum
                 # Center Dice loss calculation

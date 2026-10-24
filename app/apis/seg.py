@@ -660,6 +660,10 @@ class Train(Resource):
                 if redis_client is not None and get_state() == TrainState.IDLE.value:
                     logger().info("training aborted")
                     return make_response(jsonify({"completed": False}))
+            # A task that raised is ready too; without this check a failed
+            # training run answered "completed": true and left the model as it was.
+            if async_result.failed():
+                raise async_result.result
         except Exception as e:
             logger().exception("Failed in train_seg")
             return make_response(jsonify(error=f"Exception: {e}"), 500)

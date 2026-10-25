@@ -103,6 +103,44 @@ def test_whole_frame_reads_are_still_cached(za, tmp_path):
     assert np.array_equal(first, second)
 
 
+def test_cached_whole_frame_is_normalised_like_an_uncached_read(za, tmp_path):
+    """Without img_size, the raw and the normalised file had one name.
+
+    The raw pixels were written first under that name, so the normalised file
+    "existed" and the raw frame (0..1000 here) came back as the image, where an
+    uncached read gives it normalised to 0..1.
+    """
+    memmap_dir = tmp_path / 'memmap'
+    cached = _get_memmap_or_load(za, 0, memmap_dir=str(memmap_dir),
+                                 img_size=None, crop_box=None)
+    uncached = _get_memmap_or_load(za, 0, memmap_dir=None,
+                                   img_size=None, crop_box=None)
+    assert np.allclose(cached, uncached)
+    assert float(np.max(cached)) == 1.0
+
+
+def test_a_cache_file_of_the_old_scheme_is_not_read(za, tmp_path):
+    """Files written before the versioned names are ignored, not trusted.
+
+    On the ELEPHANT server a file left by a cropped read (before cropped
+    reads stopped using the cache) held a wrong image for Fluo-N3DH-CE 01
+    t=0: a trained model gave 38 detections there instead of 4.
+    """
+    memmap_dir = tmp_path / 'memmap'
+    memmap_dir.mkdir()
+    for name in ('ds-t0-False.dat', 'ds-t0-False-64-64.dat'):
+        stale = np.memmap(memmap_dir / name, dtype='float32', mode='w+',
+                          shape=(64, 64))
+        stale[:] = 0.5  # not the frame
+        stale.flush()
+        del stale
+    for img_size in (None, (64, 64)):
+        img = _get_memmap_or_load(za, 0, memmap_dir=str(memmap_dir),
+                                  img_size=img_size, crop_box=None)
+        assert np.unravel_index(np.argmax(img), img.shape) == (40, 20)
+        assert float(np.max(img)) == 1.0
+
+
 @pytest.mark.parametrize('run_on_flask', [False, True])
 def test_prior_training_items_need_no_label(tmp_path, monkeypatch,
                                             run_on_flask):

@@ -75,6 +75,12 @@ def _load_image(img, use_median=False, img_size=None):
     return img
 
 
+# The naming scheme of the image cache files (_get_memmap_or_load). Raise it
+# whenever what a cache file holds changes, so files written before are not
+# read back as if they held the new thing.
+MEMMAP_VERSION = 2
+
+
 def _get_memmap_or_load(za,
                         timepoint,
                         memmap_dir=None,
@@ -120,11 +126,21 @@ def _get_memmap_or_load(za,
         # small enough that the cache was never buying anything here.
         memmap_dir = None
     if memmap_dir:
-        key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
-        fpath_org = Path(memmap_dir) / f'{key}.dat'
+        # Two files: the frame's raw pixels, and the frame normalised (and
+        # resized to img_size, if given). They used to share one name when
+        # img_size was None, so the raw file, created first, was returned as
+        # if normalised. MEMMAP_VERSION is in both names, so every file written
+        # under the old scheme -- including the crops that poisoned whole
+        # timepoints before cropped reads stopped using the cache -- is
+        # ignored and rebuilt instead of read. On Fluo-N3DH-CE 01 one such file
+        # at t=0 gave a trained model 38 detections (1 of 4 nuclei) where the
+        # image itself gives 4 of 4.
+        key = (f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
+               f'-v{MEMMAP_VERSION}')
+        fpath_org = Path(memmap_dir) / f'{key}-raw.dat'
         if img_size is not None:
             key += '-' + '-'.join(map(str, img_size))
-        fpath = Path(memmap_dir) / f'{key}.dat'
+        fpath = Path(memmap_dir) / f'{key}-norm.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
             if not fpath_org.exists():
@@ -151,7 +167,7 @@ def _get_memmap_or_load(za,
                     fpath,
                     dtype='float32',
                     mode='w+',
-                    shape=img_size
+                    shape=sliced_shape if img_size is None else img_size
                 )
                 img[:] = _load_image(
                     img_org,

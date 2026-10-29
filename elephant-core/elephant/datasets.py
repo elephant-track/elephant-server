@@ -75,6 +75,12 @@ def _load_image(img, use_median=False, img_size=None):
     return img
 
 
+# The naming scheme of the image cache files (_get_memmap_or_load). Raise it
+# whenever what a cache file holds changes, so files written before are not
+# read back as if they held the new thing.
+MEMMAP_VERSION = 2
+
+
 def _get_memmap_or_load(za,
                         timepoint,
                         memmap_dir=None,
@@ -93,14 +99,48 @@ def _get_memmap_or_load(za,
         if len(za.shape) == 4:
             slices = (slice(None),) + slices
         sliced_shape = za.shape[1:]
+    if crop_box is not None:
+        # The memmap cache is keyed and shaped for whole timepoints and cannot
+        # represent a crop, in three independent ways:
+        #
+        # 1. fpath_org's key is '{dataset}-t{timepoint}-{use_median}', with
+        #    no crop in it, but it is created with shape=sliced_shape and
+        #    filled from za[(timepoint,) + slices] -- i.e. a file named "the
+        #    whole frame at t" holding only this crop. Every later read of
+        #    that timepoint, cropped differently or not cropped at all, opens
+        #    it with its own sliced_shape and either raises "mmap length is
+        #    greater than file size" or silently reads the wrong pixels. It
+        #    persists on disk, so one cropped predict poisons that timepoint
+        #    until the .dat files are removed.
+        #
+        # 2. The return slices the cached array by `slices` a second time.
+        #    Those are absolute offsets into the full frame, but fpath already
+        #    holds only the crop, so a crop at y=900 of a 1000-row frame
+        #    indexes rows 900.. of an array with crop_box[4] rows -- empty.
+        #
+        # 3. fpath is created with shape=img_size, which the caller leaves at
+        #    None whenever the crop needs no rescaling, and np.memmap raises
+        #    "shape must be given if mode == 'w+'".
+        #
+        # Reading the crop straight from the zarr is correct, and a crop is
+        # small enough that the cache was never buying anything here.
+        memmap_dir = None
     if memmap_dir:
-        key = f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
-        fpath_org = Path(memmap_dir) / f'{key}.dat'
+        # Two files: the frame's raw pixels, and the frame normalised (and
+        # resized to img_size, if given). They used to share one name when
+        # img_size was None, so the raw file, created first, was returned as
+        # if normalised. MEMMAP_VERSION is in both names, so every file written
+        # under the old scheme -- including the crops that poisoned whole
+        # timepoints before cropped reads stopped using the cache -- is
+        # ignored and rebuilt instead of read. On Fluo-N3DH-CE 01 one such file
+        # at t=0 gave a trained model 38 detections (1 of 4 nuclei) where the
+        # image itself gives 4 of 4.
+        key = (f'{Path(za.store.path).parent.name}-t{timepoint}-{use_median}'
+               f'-v{MEMMAP_VERSION}')
+        fpath_org = Path(memmap_dir) / f'{key}-raw.dat'
         if img_size is not None:
             key += '-' + '-'.join(map(str, img_size))
-        if crop_box is not None:
-            key += '-crop' + '-'.join(map(str, crop_box))
-        fpath = Path(memmap_dir) / f'{key}.dat'
+        fpath = Path(memmap_dir) / f'{key}-norm.dat'
         lock = FileLock(str(fpath) + '.lock')
         with lock:
             if not fpath_org.exists():
@@ -127,7 +167,7 @@ def _get_memmap_or_load(za,
                     fpath,
                     dtype='float32',
                     mode='w+',
-                    shape=img_size
+                    shape=sliced_shape if img_size is None else img_size
                 )
                 img[:] = _load_image(
                     img_org,
@@ -310,15 +350,8 @@ class SegmentationDatasetBase(du.Dataset):
 
             if RUN_ON_FLASK and isinstance(self, SegmentationDatasetZarr):
                 if not self.is_ae:
-                    za_label_a = zarr.open(self.zpath_seg_label, mode='a')
-                    index_pool = za_label_a.attrs.get(
-                        f'label.indices.{self.i_frame}')
-                    if index_pool is None:
-                        index_pool = np.argwhere(0 < img_label)
-                        za_label_a.attrs[
-                            f'label.indices.{self.i_frame}'
-                        ] = tuple(map(tuple, index_pool.tolist()))
-            else:
+                    index_pool = self._index_pool(img_label)
+            elif not self.is_ae:
                 index_pool = np.argwhere(0 < img_label)
             if self.is_ae:
                 origins = [
@@ -529,6 +562,28 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
             self.cache_dict_input = None
             self.cache_dict_label = None
         self.memmap_dir = memmap_dir
+        # The label attributes are one JSON file holding every labelled
+        # frame's index pool (2.5 MB for a 300-frame movie). Parsing it for
+        # every item took 4/5 of a training step. Outside live mode, labels
+        # are updated before a training run starts, not during it, so each
+        # dataset reads them once.
+        self.index_pools = {}
+        self.label_update_checked = False
+
+    def _index_pool(self, img_label):
+        """Positions to centre a crop on, for the current frame."""
+        if not self.is_livemode and self.i_frame in self.index_pools:
+            return self.index_pools[self.i_frame]
+        za_label_a = zarr.open(self.zpath_seg_label, mode='a')
+        index_pool = za_label_a.attrs.get(f'label.indices.{self.i_frame}')
+        if index_pool is None:
+            index_pool = np.argwhere(0 < img_label)
+            za_label_a.attrs[
+                f'label.indices.{self.i_frame}'
+            ] = tuple(map(tuple, index_pool.tolist()))
+        if not self.is_livemode:
+            self.index_pools[self.i_frame] = index_pool
+        return index_pool
 
     def __len__(self):
         if self.length is not None:
@@ -584,11 +639,13 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            if RUN_ON_FLASK:
+            if RUN_ON_FLASK and (self.is_livemode or
+                                 not self.label_update_checked):
                 za_label_a = zarr.open(self.zpath_seg_label, mode='a')
                 if za_label_a.attrs.get('updated', False):
                     self.cache_dict_label.clear()
                     za_label_a.attrs['updated'] = False
+                self.label_update_checked = True
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -618,7 +675,9 @@ class SegmentationDatasetZarr(SegmentationDatasetBase):
                 get_state() == TrainState.IDLE.value):
             raise KeyboardInterrupt
         if self.is_ae:
+            # prior training: the input is its own target, there is no label
             i_frame = randrange(self.za_input.shape[0])
+            img_label = None
         else:
             if self.is_livemode:
                 while True:
@@ -828,6 +887,9 @@ class FlowDatasetZarr(du.Dataset):
         else:
             self.use_cache = False
         self.memmap_dir = memmap_dir
+        # Read once per dataset; see SegmentationDatasetZarr.index_pools.
+        self.index_pools = {}
+        self.label_update_checked = False
 
     def __len__(self):
         if self.length is not None:
@@ -882,10 +944,12 @@ class FlowDatasetZarr(du.Dataset):
 
     def _get_label_at(self, ind, img_size=None):
         if self.use_cache:
-            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
-            if za_label_a.attrs.get('updated', False):
-                self.cache_dict_label.clear()
-                za_label_a.attrs['updated'] = False
+            if not self.label_update_checked:
+                za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+                if za_label_a.attrs.get('updated', False):
+                    self.cache_dict_label.clear()
+                    za_label_a.attrs['updated'] = False
+                self.label_update_checked = True
             key = f'{self.za_label.store.path}-t{ind}'
             if img_size is not None:
                 key += '-' + '-'.join(map(str, img_size))
@@ -962,13 +1026,16 @@ class FlowDatasetZarr(du.Dataset):
                     item_crop_size[i] = math.ceil(item_crop_size[i])
                 item_crop_size = [min(img_input.shape[i], item_crop_size[i])
                                   for i in range(self.n_dims)]
-            za_label_a = zarr.open(self.zpath_flow_label, mode='a')
-            index_pool = za_label_a.attrs.get(f'label.indices.{i_frame}')
+            index_pool = self.index_pools.get(i_frame)
             if index_pool is None:
-                index_pool = np.argwhere(0 < img_label[-1])
-                za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
-                    map(tuple, index_pool.tolist())
-                )
+                za_label_a = zarr.open(self.zpath_flow_label, mode='a')
+                index_pool = za_label_a.attrs.get(f'label.indices.{i_frame}')
+                if index_pool is None:
+                    index_pool = np.argwhere(0 < img_label[-1])
+                    za_label_a.attrs[f'label.indices.{i_frame}'] = tuple(
+                        map(tuple, index_pool.tolist())
+                    )
+                self.index_pools[i_frame] = index_pool
             base_index = index_pool[randrange(len(index_pool))]
             origins = [
                 randint(

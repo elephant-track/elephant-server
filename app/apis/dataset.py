@@ -32,6 +32,7 @@ from flask_restx import Namespace
 from flask_restx import Resource
 
 from elephant.config import DATASETS_DIR
+from elephant.config import MEMMAPS_DIR
 from elephant.logging import logger
 from elephant.tool import dataset as dstool
 
@@ -118,4 +119,10 @@ class Generate(Resource):
         except Exception as e:
             logger().exception("Failed in gen_datset")
             return make_response(jsonify(error=f"Exception: {e}"), 500)
+        # rename all *.h5 to *.h5.processed
+        for h5_file in h5_files:
+            h5_file.rename(h5_file.with_suffix(".h5.processed"))
+        # remove related *.dat files
+        for dat_file in Path(MEMMAPS_DIR).glob(req_json["dataset_name"] + "-t*.dat"):
+            dat_file.unlink()
         return make_response("", 200)
